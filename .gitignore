@@ -1,0 +1,15 @@
+# Python virtual environment (rebuild with: pip install -r requirements.txt)
+.venv/
+
+# Secrets: Twilio keys etc. Never commit.
+.env
+
+# Compiled Python files
+__pycache__/
+*.pyc
+
+# macOS folder metadata
+.DS_Store
+
+# Local SQLite databases (contain customer phone numbers)
+*.db
