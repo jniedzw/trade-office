@@ -1,0 +1,130 @@
+import csv
+
+from fastapi.testclient import TestClient
+from twilio.request_validator import RequestValidator
+
+import main
+import settings
+
+client = TestClient(main.app)
+
+# Ofcom's fictional numbers: reserved for testing, never belong to anyone
+MOBILE_CALLER = "+447700900123"
+OUR_NUMBER = "+447700900456"
+
+
+def use_fakes(monkeypatch, tmp_path):
+    """Stop real texts and keep the call log in a temporary folder.
+
+    Returns a list that collects every number we "texted".
+    """
+    texted_numbers = []
+
+    def fake_send_sms(to, body):
+        texted_numbers.append(to)
+        return "SM_FAKE"
+
+    monkeypatch.setattr(main, "send_sms", fake_send_sms)
+    monkeypatch.setattr(settings, "CALL_LOG_FILE", str(tmp_path / "calls.csv"))
+    return texted_numbers
+
+
+def signed_call(caller):
+    """Send /voice a fake call, signed the same way Twilio signs real ones."""
+    form = {"From": caller, "To": OUR_NUMBER}
+    validator = RequestValidator(settings.TWILIO_AUTH_TOKEN)
+    signature = validator.compute_signature(settings.PUBLIC_URL + "/voice", form)
+    return client.post("/voice", data=form, headers={"X-Twilio-Signature": signature})
+
+
+def read_log():
+    with open(settings.CALL_LOG_FILE) as file:
+        return list(csv.DictReader(file))
+
+
+def test_root():
+    response = client.get("/")
+    assert response.status_code == 200
+    assert response.json() == {"message": "Trade Office is running"}
+
+
+def test_can_text():
+    assert main.can_text("+447700900123") is True
+    assert main.can_text("anonymous") is False
+    assert main.can_text("+266696687") is False
+    assert main.can_text("+441514960000") is False
+    assert main.can_text("+12025550123") is False
+
+
+def test_test_sms_only_texts_our_own_mobile(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path)
+
+    response = client.post("/test-sms")
+
+    assert response.status_code == 200
+    assert response.json() == {"sid": "SM_FAKE"}
+    assert texted_numbers == [settings.MY_MOBILE_NUMBER]
+
+
+def test_test_sms_rejects_get():
+    assert client.get("/test-sms").status_code == 405
+
+
+def test_voice_rejects_missing_signature(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path)
+
+    response = client.post("/voice", data={"From": MOBILE_CALLER, "To": OUR_NUMBER})
+
+    assert response.status_code == 403
+    assert texted_numbers == []
+    assert not (tmp_path / "calls.csv").exists()
+
+
+def test_voice_rejects_wrong_signature(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path)
+
+    response = client.post(
+        "/voice",
+        data={"From": MOBILE_CALLER, "To": OUR_NUMBER},
+        headers={"X-Twilio-Signature": "fake"},
+    )
+
+    assert response.status_code == 403
+    assert texted_numbers == []
+
+
+def test_voice_texts_back_a_mobile_caller(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path)
+
+    response = signed_call(MOBILE_CALLER)
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/xml"
+    assert "We'll text you now" in response.text
+    assert "<Hangup />" in response.text
+    assert texted_numbers == [MOBILE_CALLER]
+
+
+def test_voice_does_not_text_a_withheld_caller(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path)
+
+    response = signed_call("anonymous")
+
+    assert response.status_code == 200
+    assert "Please try again later" in response.text
+    assert texted_numbers == []
+
+
+def test_voice_logs_each_call(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    signed_call(MOBILE_CALLER)
+    signed_call("anonymous")
+
+    rows = read_log()
+    assert len(rows) == 2
+    assert rows[0]["caller"] == MOBILE_CALLER
+    assert rows[0]["called"] == OUR_NUMBER
+    assert rows[0]["texted"] == "True"
+    assert rows[1]["caller"] == "anonymous"
+    assert rows[1]["texted"] == "False"
