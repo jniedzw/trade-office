@@ -1,6 +1,7 @@
 import os
 
-from fastapi import FastAPI, Form, Response
+from fastapi import FastAPI, Form, HTTPException, Request, Response
+from twilio.request_validator import RequestValidator
 from twilio.twiml.voice_response import VoiceResponse
 
 from sms import send_sms
@@ -13,6 +14,18 @@ TEXT_BACK_MESSAGE = (
 )
 
 app = FastAPI()
+validator = RequestValidator(os.environ["TWILIO_AUTH_TOKEN"])
+
+
+async def check_twilio_signature(request):
+    """Stop the request with a 403 unless it was really sent by Twilio."""
+    # Twilio signs our public address, not the 127.0.0.1 one our app sees.
+    url = os.environ["PUBLIC_URL"] + request.url.path
+    form = await request.form()
+    signature = request.headers.get("X-Twilio-Signature", "")
+
+    if not validator.validate(url, dict(form), signature):
+        raise HTTPException(status_code=403, detail="Invalid Twilio signature")
 
 
 @app.get("/")
@@ -29,8 +42,9 @@ def test_sms():
 
 
 @app.post("/voice")
-def voice(From: str = Form(), To: str = Form()):
+async def voice(request: Request, From: str = Form(), To: str = Form()):
     # Twilio calls this when a call reaches our number.
+    await check_twilio_signature(request)
     send_sms(From, TEXT_BACK_MESSAGE)
 
     twiml = VoiceResponse()
