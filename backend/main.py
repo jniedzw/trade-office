@@ -1,26 +1,18 @@
-import os
-
 from fastapi import FastAPI, Form, HTTPException, Request, Response
 from twilio.request_validator import RequestValidator
 from twilio.twiml.voice_response import VoiceResponse
 
+import settings
 from sms import send_sms
 
-# Hard-coded for now; Session 4 moves these into settings.
-BUSINESS_NAME = "Trade Office"
-TEXT_BACK_MESSAGE = (
-    f"Hi, it's {BUSINESS_NAME}. Sorry we missed your call. "
-    "What can we help with? We'll call you back today."
-)
-
 app = FastAPI()
-validator = RequestValidator(os.environ["TWILIO_AUTH_TOKEN"])
+validator = RequestValidator(settings.TWILIO_AUTH_TOKEN)
 
 
 async def check_twilio_signature(request):
     """Stop the request with a 403 unless it was really sent by Twilio."""
     # Twilio signs our public address, not the 127.0.0.1 one our app sees.
-    url = os.environ["PUBLIC_URL"] + request.url.path
+    url = settings.PUBLIC_URL + request.url.path
     form = await request.form()
     signature = request.headers.get("X-Twilio-Signature", "")
 
@@ -44,7 +36,7 @@ def root():
 def test_sms():
     # Only ever texts our own number, so a stranger can't use this to text anyone else.
     # Trial accounts can only send Twilio's template names; change this after upgrading.
-    sid = send_sms(os.environ["MY_MOBILE_NUMBER"], "sms_appointment_reminders")
+    sid = send_sms(settings.MY_MOBILE_NUMBER, "sms_appointment_reminders")
     return {"sid": sid}
 
 
@@ -54,10 +46,10 @@ async def voice(request: Request, From: str = Form(), To: str = Form()):
     await check_twilio_signature(request)
 
     if can_text(From):
-        send_sms(From, TEXT_BACK_MESSAGE)
-        message = f"Sorry, {BUSINESS_NAME} can't take your call right now. We'll text you now."
+        send_sms(From, settings.TEXT_BACK_MESSAGE)
+        message = settings.GREETING_WITH_TEXT
     else:
-        message = f"Sorry, {BUSINESS_NAME} can't take your call right now. Please try again later."
+        message = settings.GREETING_NO_TEXT
 
     twiml = VoiceResponse()
     twiml.say(message, voice="Polly.Amy", language="en-GB")
