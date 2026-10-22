@@ -13,3 +13,6 @@ __pycache__/
 
 # Local SQLite databases (contain customer phone numbers)
 *.db
+
+# Missed-call log (contains callers' phone numbers)
+calls.csv

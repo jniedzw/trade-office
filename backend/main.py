@@ -3,6 +3,7 @@ from twilio.request_validator import RequestValidator
 from twilio.twiml.voice_response import VoiceResponse
 
 import settings
+from call_log import log_call
 from sms import send_sms
 
 app = FastAPI()
@@ -45,11 +46,14 @@ async def voice(request: Request, From: str = Form(), To: str = Form()):
     # Twilio calls this when a call reaches our number.
     await check_twilio_signature(request)
 
-    if can_text(From):
+    texted = can_text(From)
+    if texted:
         send_sms(From, settings.TEXT_BACK_MESSAGE)
         message = settings.GREETING_WITH_TEXT
     else:
         message = settings.GREETING_NO_TEXT
+
+    log_call(From, To, texted)
 
     twiml = VoiceResponse()
     twiml.say(message, voice="Polly.Amy", language="en-GB")

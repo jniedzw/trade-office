@@ -13,6 +13,9 @@ TWILIO_PHONE_NUMBER = os.environ["TWILIO_PHONE_NUMBER"]
 MY_MOBILE_NUMBER = os.environ["MY_MOBILE_NUMBER"]
 PUBLIC_URL = os.environ["PUBLIC_URL"]
 
+# Missed-call log (contains callers' numbers, so it's gitignored)
+CALL_LOG_FILE = "calls.csv"
+
 # Business wording (moves to the clients table in Phase 2)
 BUSINESS_NAME = "Trade Office"
 TEXT_BACK_MESSAGE = (
