@@ -28,6 +28,13 @@ async def check_twilio_signature(request):
         raise HTTPException(status_code=403, detail="Invalid Twilio signature")
 
 
+def can_text(number):
+    """Return True if number is a UK mobile we can text back."""
+    # Withheld callers arrive as "anonymous", "+266696687" etc., and landlines
+    # (+441, +442, +443) can't receive texts, so only UK mobiles (+447) pass.
+    return number.startswith("+447")
+
+
 @app.get("/")
 def root():
     return {"message": "Trade Office is running"}
@@ -45,13 +52,14 @@ def test_sms():
 async def voice(request: Request, From: str = Form(), To: str = Form()):
     # Twilio calls this when a call reaches our number.
     await check_twilio_signature(request)
-    send_sms(From, TEXT_BACK_MESSAGE)
+
+    if can_text(From):
+        send_sms(From, TEXT_BACK_MESSAGE)
+        message = f"Sorry, {BUSINESS_NAME} can't take your call right now. We'll text you now."
+    else:
+        message = f"Sorry, {BUSINESS_NAME} can't take your call right now. Please try again later."
 
     twiml = VoiceResponse()
-    twiml.say(
-        f"Sorry, {BUSINESS_NAME} can't take your call right now. We'll text you now.",
-        voice="Polly.Amy",
-        language="en-GB",
-    )
+    twiml.say(message, voice="Polly.Amy", language="en-GB")
     twiml.hangup()
     return Response(content=str(twiml), media_type="application/xml")
