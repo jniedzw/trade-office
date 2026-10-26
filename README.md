@@ -6,7 +6,9 @@ Built with Python, FastAPI and Twilio. This is the first piece of a larger "AI o
 
 ## Status
 
-Phase 1 (proof of concept). The missed-call webhook, signature check and call log are built and tested with signed test requests. A live call test is next, once the Twilio account is upgraded from the trial.
+Phase 1 (proof of concept) is complete. The missed-call webhook, signature check and call log are covered by pytest tests and have been tested with real calls on a UK Twilio number, including real call forwarding from a mobile. It currently runs locally through ngrok; deploying to a server so it runs 24/7 is next.
+
+One real-world finding: on iPhones, **Live Voicemail** answers missed calls on the phone itself, so the network never treats them as unanswered and the divert never happens. It has to be turned off during setup.
 
 ## How it works
 
