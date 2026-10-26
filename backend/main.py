@@ -36,8 +36,8 @@ def root():
 @app.post("/test-sms")
 def test_sms():
     # Only ever texts our own number, so a stranger can't use this to text anyone else.
-    # Trial accounts can only send Twilio's template names; change this after upgrading.
-    sid = send_sms(settings.MY_MOBILE_NUMBER, "sms_appointment_reminders")
+  
+    sid = send_sms(settings.MY_MOBILE_NUMBER, "Test from Trade Office")
     return {"sid": sid}
 
 
