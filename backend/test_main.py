@@ -65,19 +65,8 @@ def test_can_text():
     assert main.can_text("+441514960000") is False
     assert main.can_text("+12025550123") is False
 
-
-def test_test_sms_only_texts_our_own_mobile(monkeypatch, tmp_path):
-    texted_numbers = use_fakes(monkeypatch, tmp_path)
-
-    response = client.post("/test-sms")
-
-    assert response.status_code == 200
-    assert response.json() == {"sid": "SM_FAKE"}
-    assert texted_numbers == [settings.MY_MOBILE_NUMBER]
-
-
-def test_test_sms_rejects_get():
-    assert client.get("/test-sms").status_code == 405
+def test_test_sms_is_gone():
+    assert client.post("/test-sms").status_code == 404
 
 
 def test_voice_rejects_missing_signature(monkeypatch, tmp_path):
