@@ -7,7 +7,7 @@ import settings
 from call_log import log_call
 from sms import send_sms
 
-app = FastAPI()
+app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 validator = RequestValidator(settings.TWILIO_AUTH_TOKEN)
 
 
