@@ -8,7 +8,11 @@ load_dotenv()
 
 # Secrets and machine-specific values, read from .env
 TWILIO_ACCOUNT_SID = os.environ["TWILIO_ACCOUNT_SID"]
+# The Auth Token is only used to check Twilio's signatures on webhooks.
 TWILIO_AUTH_TOKEN = os.environ["TWILIO_AUTH_TOKEN"]
+# Sending uses an API key, which can be revoked on its own if it ever leaks.
+TWILIO_API_KEY_SID = os.environ["TWILIO_API_KEY_SID"]
+TWILIO_API_KEY_SECRET = os.environ["TWILIO_API_KEY_SECRET"]
 TWILIO_PHONE_NUMBER = os.environ["TWILIO_PHONE_NUMBER"]
 MY_MOBILE_NUMBER = os.environ["MY_MOBILE_NUMBER"]
 PUBLIC_URL = os.environ["PUBLIC_URL"]

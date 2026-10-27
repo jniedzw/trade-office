@@ -2,7 +2,11 @@ from twilio.rest import Client
 
 import settings
 
-client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+client = Client(
+    settings.TWILIO_API_KEY_SID,
+    settings.TWILIO_API_KEY_SECRET,
+    settings.TWILIO_ACCOUNT_SID,
+)
 
 
 def send_sms(to: str, body: str) -> str:
