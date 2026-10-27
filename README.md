@@ -35,6 +35,8 @@ sequenceDiagram
 3. The app checks the request really came from Twilio (`X-Twilio-Signature`), then texts the caller back if they're on a UK mobile. Withheld numbers and landlines hear a message but aren't texted.
 4. Every genuine call is logged with its time, caller and whether a text was sent.
 5. The tradesperson gets an alert text for every missed call, e.g. "Missed call from 07… We've texted them back", or a prompt to ring back if the caller couldn't be texted.
+6. Family and friends on a skip list never get the business text, but the tradesperson is still alerted that they called.
+7. When a customer replies to the text-back, their message is forwarded to the tradesperson's mobile, so replies aren't lost.
 
 ## Endpoints
 
