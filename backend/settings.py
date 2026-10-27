@@ -12,7 +12,7 @@ TWILIO_AUTH_TOKEN = os.environ["TWILIO_AUTH_TOKEN"]
 TWILIO_PHONE_NUMBER = os.environ["TWILIO_PHONE_NUMBER"]
 MY_MOBILE_NUMBER = os.environ["MY_MOBILE_NUMBER"]
 PUBLIC_URL = os.environ["PUBLIC_URL"]
-
+OWNER_MOBILE_NUMBER = os.environ["OWNER_MOBILE_NUMBER"]
 # Missed-call log (contains callers' numbers, so it's gitignored)
 CALL_LOG_FILE = "calls.csv"
 
