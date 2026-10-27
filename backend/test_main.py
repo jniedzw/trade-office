@@ -11,10 +11,11 @@ client = TestClient(main.app)
 # Ofcom's fictional numbers: reserved for testing, never belong to anyone
 MOBILE_CALLER = "+447700900123"
 OUR_NUMBER = "+447700900456"
+OWNER = "+447700900789"
 
 
 def use_fakes(monkeypatch, tmp_path):
-    """Stop real texts and keep the call log in a temporary folder.
+    """Stop real texts, use a fake owner number and keep the call log in a temporary folder.
 
     Returns a list that collects every number we "texted".
     """
@@ -26,6 +27,7 @@ def use_fakes(monkeypatch, tmp_path):
 
     monkeypatch.setattr(main, "send_sms", fake_send_sms)
     monkeypatch.setattr(settings, "CALL_LOG_FILE", str(tmp_path / "calls.csv"))
+    monkeypatch.setattr(settings, "OWNER_MOBILE_NUMBER", OWNER)
     return texted_numbers
 
 
@@ -102,7 +104,8 @@ def test_voice_texts_back_a_mobile_caller(monkeypatch, tmp_path):
     assert response.headers["content-type"] == "application/xml"
     assert "We'll text you now" in response.text
     assert "<Hangup />" in response.text
-    assert texted_numbers == [MOBILE_CALLER]
+    # The caller gets the text-back, then the owner gets the alert
+    assert texted_numbers == [MOBILE_CALLER, OWNER]
 
 
 def test_voice_does_not_text_a_withheld_caller(monkeypatch, tmp_path):
@@ -112,7 +115,21 @@ def test_voice_does_not_text_a_withheld_caller(monkeypatch, tmp_path):
 
     assert response.status_code == 200
     assert "Please try again later" in response.text
-    assert texted_numbers == []
+    # Only the owner is alerted; there's no one to text back
+    assert texted_numbers == [OWNER]
+
+
+def test_owner_alert():
+    assert main.owner_alert(MOBILE_CALLER, True) == (
+        f"Missed call from {MOBILE_CALLER}. We've texted them back."
+    )
+    assert main.owner_alert("+441514960000", False) == (
+        "Missed call from +441514960000. We couldn't text them, so please ring back."
+    )
+    assert main.owner_alert("anonymous", False) == "Missed call from a withheld number."
+    assert (
+        main.owner_alert("+266696687", False) == "Missed call from a withheld number."
+    )
 
 
 def test_voice_logs_each_call(monkeypatch, tmp_path):

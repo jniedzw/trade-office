@@ -28,6 +28,17 @@ def can_text(number):
     return number.startswith("+447")
 
 
+def owner_alert(caller, texted):
+    """Return the text we send the tradesperson about a missed call."""
+    if texted:
+        return f"Missed call from {caller}. We've texted them back."
+    # "+266696687" spells ANONYMOUS on a keypad: Twilio's code for a withheld number.
+    elif caller.startswith("+") and caller != "+266696687":
+        return f"Missed call from {caller}. We couldn't text them, so please ring back."
+    else:
+        return "Missed call from a withheld number."
+
+
 @app.get("/")
 def root():
     return {"message": "Trade Office is running"}
@@ -36,7 +47,6 @@ def root():
 @app.post("/test-sms")
 def test_sms():
     # Only ever texts our own number, so a stranger can't use this to text anyone else.
-  
     sid = send_sms(settings.MY_MOBILE_NUMBER, "Test from Trade Office")
     return {"sid": sid}
 
@@ -54,6 +64,7 @@ async def voice(request: Request, From: str = Form(), To: str = Form()):
         message = settings.GREETING_NO_TEXT
 
     log_call(From, To, texted)
+    send_sms(settings.OWNER_MOBILE_NUMBER, owner_alert(From, texted))
 
     twiml = VoiceResponse()
     twiml.say(message, voice="Polly.Amy", language="en-GB")
