@@ -39,6 +39,14 @@ def signed_call(caller):
     return client.post("/voice", data=form, headers={"X-Twilio-Signature": signature})
 
 
+def signed_text(sender, body):
+    """Send /sms a fake text message, signed the same way Twilio signs real ones."""
+    form = {"From": sender, "To": OUR_NUMBER, "Body": body}
+    validator = RequestValidator(settings.TWILIO_AUTH_TOKEN)
+    signature = validator.compute_signature(settings.PUBLIC_URL + "/sms", form)
+    return client.post("/sms", data=form, headers={"X-Twilio-Signature": signature})
+
+
 def read_log():
     with open(settings.CALL_LOG_FILE) as file:
         return list(csv.DictReader(file))
@@ -145,3 +153,39 @@ def test_voice_logs_each_call(monkeypatch, tmp_path):
     assert rows[0]["texted"] == "True"
     assert rows[1]["caller"] == "anonymous"
     assert rows[1]["texted"] == "False"
+
+
+def test_forward_message():
+    assert main.forward_message(MOBILE_CALLER, "Need a boiler looked at") == (
+        f"From {MOBILE_CALLER}: Need a boiler looked at"
+    )
+    assert "picture or empty message" in main.forward_message(MOBILE_CALLER, "  ")
+
+
+def test_sms_forwards_a_customer_reply_to_the_owner(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path)
+
+    response = signed_text(MOBILE_CALLER, "Need a boiler looked at")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/xml"
+    assert "<Response />" in response.text
+    assert texted_numbers == [OWNER]
+
+
+def test_sms_does_not_forward_the_owners_own_texts(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path)
+
+    response = signed_text(OWNER, "booked Dave Monday 9am")
+
+    assert response.status_code == 200
+    assert texted_numbers == []
+
+
+def test_sms_rejects_missing_signature(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path)
+
+    response = client.post("/sms", data={"From": MOBILE_CALLER, "Body": "spam"})
+
+    assert response.status_code == 403
+    assert texted_numbers == []

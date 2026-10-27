@@ -24,22 +24,26 @@ sequenceDiagram
     A->>A: Check Twilio signature
     A->>T: Text the caller back (UK mobiles only)
     A->>A: Log the call
+    A->>T: Text the trade a missed-call alert
     A-->>T: TwiML: short message, then hang up
     T->>C: Plays message and sends text
+    T->>P: Sends the alert to the trade
 ```
 
 1. The tradesperson sets their mobile to forward unanswered calls to a Twilio number.
 2. Twilio sends the call details to the `/voice` webhook.
 3. The app checks the request really came from Twilio (`X-Twilio-Signature`), then texts the caller back if they're on a UK mobile. Withheld numbers and landlines hear a message but aren't texted.
 4. Every genuine call is logged with its time, caller and whether a text was sent.
+5. The tradesperson gets an alert text for every missed call, e.g. "Missed call from 07… We've texted them back", or a prompt to ring back if the caller couldn't be texted.
 
 ## Endpoints
 
 | Method | Path | Does |
 | --- | --- | --- |
 | GET | `/` | Health check |
-| POST | `/test-sms` | Sends a test text to the owner's own mobile only |
+| POST | `/test-sms` | Sends a test text to the operator's own mobile only |
 | POST | `/voice` | Twilio webhook for incoming calls |
+| POST | `/sms` | Twilio webhook for incoming texts: forwards customers' replies to the tradesperson |
 
 ## Project layout
 

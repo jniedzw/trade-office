@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Form, HTTPException, Request, Response
 from twilio.request_validator import RequestValidator
+from twilio.twiml.messaging_response import MessagingResponse
 from twilio.twiml.voice_response import VoiceResponse
 
 import settings
@@ -39,6 +40,13 @@ def owner_alert(caller, texted):
         return "Missed call from a withheld number."
 
 
+def forward_message(sender, body):
+    """Return the text we pass on to the tradesperson when a customer replies."""
+    if body.strip() == "":
+        return f"From {sender}: (a picture or empty message, check your Twilio logs)"
+    return f"From {sender}: {body}"
+
+
 @app.get("/")
 def root():
     return {"message": "Trade Office is running"}
@@ -70,3 +78,17 @@ async def voice(request: Request, From: str = Form(), To: str = Form()):
     twiml.say(message, voice="Polly.Amy", language="en-GB")
     twiml.hangup()
     return Response(content=str(twiml), media_type="application/xml")
+
+
+@app.post("/sms")
+async def incoming_sms(request: Request, From: str = Form(), Body: str = Form("")):
+    # Twilio calls this when someone texts our number.
+    await check_twilio_signature(request)
+
+    # Texts from the owner will be commands for the assistant later; for now
+    # we only pass on customers' messages so their replies aren't lost.
+    if From != settings.OWNER_MOBILE_NUMBER:
+        send_sms(settings.OWNER_MOBILE_NUMBER, forward_message(From, Body))
+
+    # An empty reply, so Twilio doesn't send the customer anything back.
+    return Response(content=str(MessagingResponse()), media_type="application/xml")
