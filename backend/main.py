@@ -33,6 +33,8 @@ def owner_alert(caller, texted):
     """Return the text we send the tradesperson about a missed call."""
     if texted:
         return f"Missed call from {caller}. We've texted them back."
+    elif caller in settings.SKIP_NUMBERS:
+        return f"Missed call from {caller} (family and friends, so no text was sent)."
     # "+266696687" spells ANONYMOUS on a keypad: Twilio's code for a withheld number.
     elif caller.startswith("+") and caller != "+266696687":
         return f"Missed call from {caller}. We couldn't text them, so please ring back."
@@ -64,7 +66,8 @@ async def voice(request: Request, From: str = Form(), To: str = Form()):
     # Twilio calls this when a call reaches our number.
     await check_twilio_signature(request)
 
-    texted = can_text(From)
+    # Family and friends on the skip list never get the business text.
+    texted = can_text(From) and From not in settings.SKIP_NUMBERS
     if texted:
         send_sms(From, settings.TEXT_BACK_MESSAGE)
         message = settings.GREETING_WITH_TEXT
