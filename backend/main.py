@@ -54,13 +54,6 @@ def root():
     return {"message": "Trade Office is running"}
 
 
-@app.post("/test-sms")
-def test_sms():
-    # Only ever texts our own number, so a stranger can't use this to text anyone else.
-    sid = send_sms(settings.MY_MOBILE_NUMBER, "Test from Trade Office")
-    return {"sid": sid}
-
-
 @app.post("/voice")
 async def voice(request: Request, From: str = Form(), To: str = Form()):
     # Twilio calls this when a call reaches our number.
