@@ -1,4 +1,4 @@
-from sqlmodel import Field, SQLModel, create_engine
+from sqlmodel import Field, Session, SQLModel, create_engine, select
 
 DATABASE_URL = "sqlite:///trade_office.db"
 engine = create_engine(DATABASE_URL)
@@ -18,3 +18,10 @@ class Client(SQLModel, table=True):
 def create_tables():
     """Create any tables that don't exist yet."""
     SQLModel.metadata.create_all(engine)
+
+
+def get_client_by_number(twilio_number):
+    """Return the client who owns this Twilio number, or None if nobody does."""
+    with Session(engine) as session:
+        statement = select(Client).where(Client.twilio_number == twilio_number)
+        return session.exec(statement).first()
