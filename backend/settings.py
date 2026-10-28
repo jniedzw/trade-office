@@ -27,6 +27,3 @@ def read_skip_numbers():
 
 
 SKIP_NUMBERS = read_skip_numbers()
-
-# Missed-call log (contains callers' numbers, so it's gitignored)
-CALL_LOG_FILE = "calls.csv"

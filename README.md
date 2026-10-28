@@ -51,9 +51,12 @@ sequenceDiagram
 ```
 backend/
   main.py          # FastAPI app and endpoints
+  database.py      # SQLModel tables (Client, Call) and lookups
   sms.py           # send_sms() using the Twilio client
-  call_log.py      # log_call() writes missed calls to calls.csv
-  settings.py      # all settings and message wording in one place
+  settings.py      # app-wide settings read from .env
+  add_client.py    # add a real client by answering questions
+  list_clients.py  # show every client
+  seed.py          # add two fake clients for local testing
   requirements.txt
   .env.example     # the settings the app needs (copy to .env)
 ```

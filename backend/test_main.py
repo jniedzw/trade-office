@@ -1,13 +1,11 @@
-import csv
-
 from fastapi.testclient import TestClient
-from sqlmodel import Session, create_engine
+from sqlmodel import Session, create_engine, select
 from twilio.request_validator import RequestValidator
 
 import database
 import main
 import settings
-from database import Client
+from database import Call, Client
 
 client = TestClient(main.app)
 
@@ -32,7 +30,6 @@ def use_fakes(monkeypatch, tmp_path, active=True):
         return "SM_FAKE"
 
     monkeypatch.setattr(main, "send_sms", fake_send_sms)
-    monkeypatch.setattr(settings, "CALL_LOG_FILE", str(tmp_path / "calls.csv"))
 
     engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}")
     monkeypatch.setattr(database, "engine", engine)
@@ -69,8 +66,9 @@ def signed_text(sender, body):
 
 
 def read_log():
-    with open(settings.CALL_LOG_FILE) as file:
-        return list(csv.DictReader(file))
+    """Return every call saved in the test database, oldest first."""
+    with Session(database.engine) as session:
+        return session.exec(select(Call).order_by(Call.id)).all()
 
 
 def test_root():
@@ -98,7 +96,7 @@ def test_voice_rejects_missing_signature(monkeypatch, tmp_path):
 
     assert response.status_code == 403
     assert texted_numbers == []
-    assert not (tmp_path / "calls.csv").exists()
+    assert read_log() == []
 
 
 def test_voice_rejects_wrong_signature(monkeypatch, tmp_path):
@@ -159,11 +157,12 @@ def test_voice_logs_each_call(monkeypatch, tmp_path):
 
     rows = read_log()
     assert len(rows) == 2
-    assert rows[0]["caller"] == MOBILE_CALLER
-    assert rows[0]["called"] == OUR_NUMBER
-    assert rows[0]["texted"] == "True"
-    assert rows[1]["caller"] == "anonymous"
-    assert rows[1]["texted"] == "False"
+    assert rows[0].caller == MOBILE_CALLER
+    assert rows[0].client_id == 1  # linked to the test client
+    assert rows[0].texted is True
+    assert rows[0].time is not None
+    assert rows[1].caller == "anonymous"
+    assert rows[1].texted is False
 
 
 def test_forward_message():
@@ -222,7 +221,7 @@ def test_voice_does_not_text_family_and_friends(monkeypatch, tmp_path):
     assert "Please try again later" in response.text
     # The caller is skipped, but the owner still hears about the missed call
     assert texted_numbers == [OWNER]
-    assert read_log()[0]["texted"] == "False"
+    assert read_log()[0].texted is False
 
 
 def test_owner_alert_for_family_and_friends(monkeypatch):
@@ -271,3 +270,14 @@ def test_sms_to_a_paused_client_is_not_forwarded(monkeypatch, tmp_path):
 
     assert response.status_code == 200
     assert texted_numbers == []
+
+
+def test_calls_to_an_unknown_number_are_not_logged(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    form = {"From": MOBILE_CALLER, "To": "+447700900999"}
+    validator = RequestValidator(settings.TWILIO_AUTH_TOKEN)
+    signature = validator.compute_signature(settings.PUBLIC_URL + "/voice", form)
+
+    client.post("/voice", data=form, headers={"X-Twilio-Signature": signature})
+
+    assert read_log() == []
