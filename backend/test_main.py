@@ -1,10 +1,13 @@
 import csv
 
 from fastapi.testclient import TestClient
+from sqlmodel import Session, create_engine
 from twilio.request_validator import RequestValidator
 
+import database
 import main
 import settings
+from database import Client
 
 client = TestClient(main.app)
 
@@ -14,20 +17,38 @@ OUR_NUMBER = "+447700900456"
 OWNER = "+447700900789"
 
 
-def use_fakes(monkeypatch, tmp_path):
-    """Stop real texts, use a fake owner number and keep the call log in a temporary folder.
+def use_fakes(monkeypatch, tmp_path, active=True):
+    """Stop real texts, use a temporary database with one test client,
+    and keep the call log in a temporary folder.
 
     Returns a list that collects every number we "texted".
     """
     texted_numbers = []
 
-    def fake_send_sms(to, body):
+    def fake_send_sms(to, body, from_number):
+        # Every text must come from the client's own Twilio number
+        assert from_number == OUR_NUMBER
         texted_numbers.append(to)
         return "SM_FAKE"
 
     monkeypatch.setattr(main, "send_sms", fake_send_sms)
     monkeypatch.setattr(settings, "CALL_LOG_FILE", str(tmp_path / "calls.csv"))
-    monkeypatch.setattr(settings, "OWNER_MOBILE_NUMBER", OWNER)
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    monkeypatch.setattr(database, "engine", engine)
+    database.create_tables()
+    with Session(engine) as session:
+        session.add(
+            Client(
+                business_name="Test Plumbing",
+                owner_mobile=OWNER,
+                twilio_number=OUR_NUMBER,
+                text_back_message="Hi, it's Test Plumbing. Sorry we missed your call.",
+                active=active,
+            )
+        )
+        session.commit()
+
     return texted_numbers
 
 
@@ -175,7 +196,9 @@ def test_sms_does_not_forward_the_owners_own_texts(monkeypatch, tmp_path):
 def test_sms_rejects_missing_signature(monkeypatch, tmp_path):
     texted_numbers = use_fakes(monkeypatch, tmp_path)
 
-    response = client.post("/sms", data={"From": MOBILE_CALLER, "Body": "spam"})
+    response = client.post(
+        "/sms", data={"From": MOBILE_CALLER, "To": OUR_NUMBER, "Body": "spam"}
+    )
 
     assert response.status_code == 403
     assert texted_numbers == []
@@ -207,3 +230,44 @@ def test_owner_alert_for_family_and_friends(monkeypatch):
     assert main.owner_alert(MOBILE_CALLER, False) == (
         f"Missed call from {MOBILE_CALLER} (family and friends, so no text was sent)."
     )
+
+
+def test_voice_uses_the_clients_business_name(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    response = signed_call(MOBILE_CALLER)
+
+    assert "Sorry, Test Plumbing can't take your call" in response.text
+
+
+def test_voice_for_a_number_with_no_client(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path)
+    form = {"From": MOBILE_CALLER, "To": "+447700900999"}
+    validator = RequestValidator(settings.TWILIO_AUTH_TOKEN)
+    signature = validator.compute_signature(settings.PUBLIC_URL + "/voice", form)
+
+    response = client.post(
+        "/voice", data=form, headers={"X-Twilio-Signature": signature}
+    )
+
+    assert response.status_code == 200
+    assert "isn't available right now" in response.text
+    assert texted_numbers == []
+
+
+def test_voice_for_a_paused_client(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path, active=False)
+
+    response = signed_call(MOBILE_CALLER)
+
+    assert "isn't available right now" in response.text
+    assert texted_numbers == []
+
+
+def test_sms_to_a_paused_client_is_not_forwarded(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path, active=False)
+
+    response = signed_text(MOBILE_CALLER, "Hello?")
+
+    assert response.status_code == 200
+    assert texted_numbers == []

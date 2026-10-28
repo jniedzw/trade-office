@@ -1,6 +1,9 @@
+import os
+
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
-DATABASE_URL = "sqlite:///trade_office.db"
+# A local SQLite file unless .env says otherwise (e.g. Postgres on Render).
+DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///trade_office.db")
 engine = create_engine(DATABASE_URL)
 
 
