@@ -9,11 +9,11 @@ client = Client(
 )
 
 
-def send_sms(to: str, body: str) -> str:
-    """Send a text from our Twilio number and return Twilio's message ID."""
+def send_sms(to: str, body: str, from_number: str) -> str:
+    """Send a text from one of our Twilio numbers and return Twilio's message ID."""
     message = client.messages.create(
         to=to,
-        from_=settings.TWILIO_PHONE_NUMBER,
+        from_=from_number,
         body=body,
     )
     return message.sid

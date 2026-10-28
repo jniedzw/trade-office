@@ -5,7 +5,10 @@ from twilio.twiml.voice_response import VoiceResponse
 
 import settings
 from call_log import log_call
+from database import get_client_by_number
 from sms import send_sms
+
+NOT_IN_SERVICE = "Sorry, this number isn't available right now. Please try again later."
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 validator = RequestValidator(settings.TWILIO_AUTH_TOKEN)
@@ -42,6 +45,13 @@ def owner_alert(caller, texted):
         return "Missed call from a withheld number."
 
 
+def greeting(business_name, texted):
+    """Return what the caller hears before we hang up."""
+    if texted:
+        return f"Sorry, {business_name} can't take your call right now. We'll text you now."
+    return f"Sorry, {business_name} can't take your call right now. Please try again later."
+
+
 def forward_message(sender, body):
     """Return the text we pass on to the tradesperson when a customer replies."""
     if body.strip() == "":
@@ -59,16 +69,20 @@ async def voice(request: Request, From: str = Form(), To: str = Form()):
     # Twilio calls this when a call reaches our number.
     await check_twilio_signature(request)
 
-    # Family and friends on the skip list never get the business text.
-    texted = can_text(From) and From not in settings.SKIP_NUMBERS
-    if texted:
-        send_sms(From, settings.TEXT_BACK_MESSAGE)
-        message = settings.GREETING_WITH_TEXT
+    # Which tradesperson owns the number that was called?
+    client = get_client_by_number(To)
+    if client is None or not client.active:
+        message = NOT_IN_SERVICE
     else:
-        message = settings.GREETING_NO_TEXT
+        # Family and friends on the skip list never get the business text.
+        texted = can_text(From) and From not in settings.SKIP_NUMBERS
+        if texted:
+            send_sms(From, client.text_back_message, client.twilio_number)
+        message = greeting(client.business_name, texted)
 
-    log_call(From, To, texted)
-    send_sms(settings.OWNER_MOBILE_NUMBER, owner_alert(From, texted))
+        log_call(From, To, texted)
+        alert = owner_alert(From, texted)
+        send_sms(client.owner_mobile, alert, client.twilio_number)
 
     twiml = VoiceResponse()
     twiml.say(message, voice="Polly.Amy", language="en-GB")
@@ -77,14 +91,19 @@ async def voice(request: Request, From: str = Form(), To: str = Form()):
 
 
 @app.post("/sms")
-async def incoming_sms(request: Request, From: str = Form(), Body: str = Form("")):
+async def incoming_sms(
+    request: Request, From: str = Form(), To: str = Form(), Body: str = Form("")
+):
     # Twilio calls this when someone texts our number.
     await check_twilio_signature(request)
 
+    client = get_client_by_number(To)
+
     # Texts from the owner will be commands for the assistant later; for now
     # we only pass on customers' messages so their replies aren't lost.
-    if From != settings.OWNER_MOBILE_NUMBER:
-        send_sms(settings.OWNER_MOBILE_NUMBER, forward_message(From, Body))
+    if client is not None and client.active and From != client.owner_mobile:
+        forwarded = forward_message(From, Body)
+        send_sms(client.owner_mobile, forwarded, client.twilio_number)
 
     # An empty reply, so Twilio doesn't send the customer anything back.
     return Response(content=str(MessagingResponse()), media_type="application/xml")
