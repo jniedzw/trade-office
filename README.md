@@ -43,7 +43,6 @@ sequenceDiagram
 | Method | Path | Does |
 | --- | --- | --- |
 | GET | `/` | Health check |
-| POST | `/test-sms` | Sends a test text to the operator's own mobile only |
 | POST | `/voice` | Twilio webhook for incoming calls |
 | POST | `/sms` | Twilio webhook for incoming texts: forwards customers' replies to the tradesperson |
 
@@ -72,7 +71,7 @@ cp .env.example .env    # then fill in your own values
 uvicorn main:app --reload
 ```
 
-Then open http://127.0.0.1:8000/docs.
+Check it's running at http://127.0.0.1:8000, and run the tests with `pytest`. (The interactive `/docs` pages are switched off, because the app is public.)
 
 To receive real calls, expose the app with ngrok and set your Twilio number's "A call comes in" webhook to `https://<your-ngrok-domain>/voice` (HTTP POST). Set `PUBLIC_URL` in `.env` to the same ngrok address, as the signature check depends on it.
 
@@ -80,7 +79,7 @@ To receive real calls, expose the app with ngrok and set your Twilio number's "A
 
 - Secrets live in `.env`, which is never committed.
 - `/voice` rejects any request without a valid Twilio signature, so the public URL can't be used to send texts.
-- `/test-sms` can only text the owner's own number.
+- No public endpoint can send a text on demand: an earlier `/test-sms` endpoint was removed once the app went live, because anyone could have triggered texts at our cost. The API docs pages are switched off too.
 - The call log contains callers' numbers, so it is gitignored. Customers are only ever texted about their own enquiry (UK GDPR).
 
 ## Roadmap

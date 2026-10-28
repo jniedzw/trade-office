@@ -65,6 +65,7 @@ def test_can_text():
     assert main.can_text("+441514960000") is False
     assert main.can_text("+12025550123") is False
 
+
 def test_test_sms_is_gone():
     assert client.post("/test-sms").status_code == 404
 
