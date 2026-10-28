@@ -81,3 +81,15 @@ def add_skip_number(client_id, number):
         session.add(SkipNumber(client_id=client_id, number=number))
         session.commit()
     return True
+
+
+def update_client(client_id, business_name, owner_mobile, text_back_message, active):
+    """Save new details for an existing client."""
+    with Session(engine) as session:
+        client = session.get(Client, client_id)
+        client.business_name = business_name
+        client.owner_mobile = owner_mobile
+        client.text_back_message = text_back_message
+        client.active = active
+        session.add(client)
+        session.commit()

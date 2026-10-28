@@ -56,6 +56,7 @@ backend/
   settings.py      # app-wide settings read from .env
   add_client.py    # add a real client by answering questions
   list_clients.py  # show every client
+  update_client.py # change a client's details, or pause them
   add_skip_numbers.py  # add a client's family and friends (never texted)
   seed.py          # add two fake clients for local testing
   requirements.txt
