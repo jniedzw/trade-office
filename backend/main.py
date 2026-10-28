@@ -4,8 +4,7 @@ from twilio.twiml.messaging_response import MessagingResponse
 from twilio.twiml.voice_response import VoiceResponse
 
 import settings
-from call_log import log_call
-from database import create_tables, get_client_by_number
+from database import create_tables, get_client_by_number, log_call
 from sms import send_sms
 
 NOT_IN_SERVICE = "Sorry, this number isn't available right now. Please try again later."
@@ -81,7 +80,7 @@ async def voice(request: Request, From: str = Form(), To: str = Form()):
             send_sms(From, client.text_back_message, client.twilio_number)
         message = greeting(client.business_name, texted)
 
-        log_call(From, To, texted)
+        log_call(client.id, From, texted)
         alert = owner_alert(From, texted)
         send_sms(client.owner_mobile, alert, client.twilio_number)
 
