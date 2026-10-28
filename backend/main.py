@@ -4,7 +4,7 @@ from twilio.twiml.messaging_response import MessagingResponse
 from twilio.twiml.voice_response import VoiceResponse
 
 import settings
-from database import create_tables, get_client_by_number, log_call
+from database import create_tables, get_client_by_number, is_skipped, log_call
 from sms import send_sms
 
 NOT_IN_SERVICE = "Sorry, this number isn't available right now. Please try again later."
@@ -32,11 +32,11 @@ def can_text(number):
     return number.startswith("+447")
 
 
-def owner_alert(caller, texted):
+def owner_alert(caller, texted, skipped=False):
     """Return the text we send the tradesperson about a missed call."""
     if texted:
         return f"Missed call from {caller}. We've texted them back."
-    elif caller in settings.SKIP_NUMBERS:
+    elif skipped:
         return f"Missed call from {caller} (family and friends, so no text was sent)."
     # "+266696687" spells ANONYMOUS on a keypad: Twilio's code for a withheld number.
     elif caller.startswith("+") and caller != "+266696687":
@@ -75,13 +75,14 @@ async def voice(request: Request, From: str = Form(), To: str = Form()):
         message = NOT_IN_SERVICE
     else:
         # Family and friends on the skip list never get the business text.
-        texted = can_text(From) and From not in settings.SKIP_NUMBERS
+        skipped = is_skipped(client.id, From)
+        texted = can_text(From) and not skipped
         if texted:
             send_sms(From, client.text_back_message, client.twilio_number)
         message = greeting(client.business_name, texted)
 
         log_call(client.id, From, texted)
-        alert = owner_alert(From, texted)
+        alert = owner_alert(From, texted, skipped)
         send_sms(client.owner_mobile, alert, client.twilio_number)
 
     twiml = VoiceResponse()
