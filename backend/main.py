@@ -5,12 +5,13 @@ from twilio.twiml.voice_response import VoiceResponse
 
 import settings
 from call_log import log_call
-from database import get_client_by_number
+from database import create_tables, get_client_by_number
 from sms import send_sms
 
 NOT_IN_SERVICE = "Sorry, this number isn't available right now. Please try again later."
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+create_tables()  # Make sure the tables exist when the app starts
 validator = RequestValidator(settings.TWILIO_AUTH_TOKEN)
 
 
