@@ -43,3 +43,24 @@ def test_get_client_by_number_returns_none_for_unknown_number(monkeypatch, tmp_p
     use_temp_database(monkeypatch, tmp_path)
 
     assert database.get_client_by_number("+447700900999") is None
+
+
+def test_skip_numbers_belong_to_one_client(monkeypatch, tmp_path):
+    engine = use_temp_database(monkeypatch, tmp_path)
+    add_client(engine, "+447700900001")  # client 1
+    add_client(engine, "+447700900002")  # client 2
+    mum = "+447700900111"
+
+    assert database.add_skip_number(1, mum) is True
+
+    assert database.is_skipped(1, mum) is True
+    # Client 2's callers aren't affected by client 1's list
+    assert database.is_skipped(2, mum) is False
+
+
+def test_adding_the_same_skip_number_twice(monkeypatch, tmp_path):
+    engine = use_temp_database(monkeypatch, tmp_path)
+    add_client(engine, TWILIO_NUMBER)
+
+    assert database.add_skip_number(1, "+447700900111") is True
+    assert database.add_skip_number(1, "+447700900111") is False

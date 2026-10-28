@@ -14,16 +14,3 @@ TWILIO_AUTH_TOKEN = os.environ["TWILIO_AUTH_TOKEN"]
 TWILIO_API_KEY_SID = os.environ["TWILIO_API_KEY_SID"]
 TWILIO_API_KEY_SECRET = os.environ["TWILIO_API_KEY_SECRET"]
 PUBLIC_URL = os.environ["PUBLIC_URL"]
-
-
-def read_skip_numbers():
-    """Return the family and friends numbers that never get the business text."""
-    # In .env as one comma-separated line; optional, so it can be missing or empty.
-    numbers = []
-    for number in os.environ.get("SKIP_NUMBERS", "").split(","):
-        if number.strip():
-            numbers.append(number.strip())
-    return numbers
-
-
-SKIP_NUMBERS = read_skip_numbers()

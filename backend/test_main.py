@@ -203,17 +203,9 @@ def test_sms_rejects_missing_signature(monkeypatch, tmp_path):
     assert texted_numbers == []
 
 
-def test_read_skip_numbers(monkeypatch):
-    monkeypatch.setenv("SKIP_NUMBERS", " +447700900111, +447700900222 ,,")
-    assert settings.read_skip_numbers() == ["+447700900111", "+447700900222"]
-
-    monkeypatch.setenv("SKIP_NUMBERS", "")
-    assert settings.read_skip_numbers() == []
-
-
 def test_voice_does_not_text_family_and_friends(monkeypatch, tmp_path):
     texted_numbers = use_fakes(monkeypatch, tmp_path)
-    monkeypatch.setattr(settings, "SKIP_NUMBERS", [MOBILE_CALLER])
+    database.add_skip_number(1, MOBILE_CALLER)  # client 1 is the test client
 
     response = signed_call(MOBILE_CALLER)
 
@@ -224,9 +216,8 @@ def test_voice_does_not_text_family_and_friends(monkeypatch, tmp_path):
     assert read_log()[0].texted is False
 
 
-def test_owner_alert_for_family_and_friends(monkeypatch):
-    monkeypatch.setattr(settings, "SKIP_NUMBERS", [MOBILE_CALLER])
-    assert main.owner_alert(MOBILE_CALLER, False) == (
+def test_owner_alert_for_family_and_friends():
+    assert main.owner_alert(MOBILE_CALLER, False, skipped=True) == (
         f"Missed call from {MOBILE_CALLER} (family and friends, so no text was sent)."
     )
 

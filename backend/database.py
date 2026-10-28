@@ -1,7 +1,7 @@
 import os
 from datetime import datetime, timezone
 
-from sqlmodel import Field, Session, SQLModel, create_engine, select
+from sqlmodel import Field, Session, SQLModel, UniqueConstraint, create_engine, select
 
 # A local SQLite file unless .env says otherwise (on Render it's on the persistent disk).
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///trade_office.db")
@@ -34,6 +34,17 @@ class Call(SQLModel, table=True):
     time: datetime = Field(default_factory=now_utc)
 
 
+class SkipNumber(SQLModel, table=True):
+    """A number (family, friends, suppliers) that never gets this client's text-back."""
+
+    # The same number can't be on one client's list twice.
+    __table_args__ = (UniqueConstraint("client_id", "number"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    client_id: int = Field(foreign_key="client.id", index=True)
+    number: str
+
+
 def create_tables():
     """Create any tables that don't exist yet."""
     SQLModel.metadata.create_all(engine)
@@ -51,3 +62,22 @@ def log_call(client_id, caller, texted):
     with Session(engine) as session:
         session.add(Call(client_id=client_id, caller=caller, texted=texted))
         session.commit()
+
+
+def is_skipped(client_id, number):
+    """Return True if this number is on the client's family and friends list."""
+    with Session(engine) as session:
+        statement = select(SkipNumber).where(
+            SkipNumber.client_id == client_id, SkipNumber.number == number
+        )
+        return session.exec(statement).first() is not None
+
+
+def add_skip_number(client_id, number):
+    """Add a number to the client's list. Return False if it was already there."""
+    if is_skipped(client_id, number):
+        return False
+    with Session(engine) as session:
+        session.add(SkipNumber(client_id=client_id, number=number))
+        session.commit()
+    return True
