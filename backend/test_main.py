@@ -16,23 +16,28 @@ client = TestClient(main.app)
 MOBILE_CALLER = "+447700900123"
 OUR_NUMBER = "+447700900456"
 OWNER = "+447700900789"
+JAMES = "+447700900321"
 
 
-def use_fakes(monkeypatch, tmp_path, active=True):
+def use_fakes(monkeypatch, tmp_path, active=True, failing=()):
     """Stop real texts, use a temporary database with one test client,
     and keep the call log in a temporary folder.
 
-    Returns a list that collects every number we "texted".
+    Texts to any number in failing raise an error, like Twilio does when it can't
+    send. Returns a list that collects every number we "texted".
     """
     texted_numbers = []
 
     def fake_send_sms(to, body, from_number):
         # Every text must come from the client's own Twilio number
         assert from_number == OUR_NUMBER
+        if to in failing:
+            raise RuntimeError("Twilio is unhappy")
         texted_numbers.append(to)
         return "SM_FAKE"
 
     monkeypatch.setattr(main, "send_sms", fake_send_sms)
+    monkeypatch.setattr(settings, "ALERT_MOBILE", JAMES)
     # The cleanup job must never reach the real Twilio account from a test.
     monkeypatch.setattr(main, "count_old_twilio_records", lambda cutoff: (0, 0))
 
@@ -333,3 +338,106 @@ def test_cleanup_runs_when_the_app_starts(monkeypatch, tmp_path):
             time.sleep(0.1)
 
     assert read_log() == []
+
+
+def test_voice_when_the_customer_text_fails(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path, failing=[MOBILE_CALLER])
+
+    response = signed_call(MOBILE_CALLER)
+
+    assert response.status_code == 200
+    # The caller isn't promised a text that never came
+    assert "Please try again later" in response.text
+    assert texted_numbers == [JAMES, OWNER]
+    assert read_log()[0].texted is False
+
+
+def test_owner_is_told_to_ring_back_when_the_customer_text_fails(monkeypatch, tmp_path):
+    sent = []
+    use_fakes(monkeypatch, tmp_path)
+
+    def fail_for_caller(to, body, from_number):
+        if to == MOBILE_CALLER:
+            raise RuntimeError("Twilio is unhappy")
+        sent.append(body)
+
+    monkeypatch.setattr(main, "send_sms", fail_for_caller)
+
+    signed_call(MOBILE_CALLER)
+
+    # sent[0] is my alert; sent[1] is what the owner gets
+    assert "please ring back" in sent[1]
+
+
+def test_voice_when_the_owner_alert_fails(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path, failing=[OWNER])
+
+    response = signed_call(MOBILE_CALLER)
+
+    assert response.status_code == 200
+    assert "We'll text you now" in response.text
+    assert texted_numbers == [MOBILE_CALLER, JAMES]
+    assert len(read_log()) == 1
+
+
+def test_voice_when_every_text_fails(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(
+        monkeypatch, tmp_path, failing=[MOBILE_CALLER, OWNER, JAMES]
+    )
+
+    response = signed_call(MOBILE_CALLER)
+
+    assert response.status_code == 200
+    assert texted_numbers == []
+    assert read_log()[0].texted is False
+
+
+def test_voice_when_the_call_cant_be_logged(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path)
+
+    def broken_log(client_id, caller, texted):
+        raise RuntimeError("database is unhappy")
+
+    monkeypatch.setattr(main, "log_call", broken_log)
+
+    response = signed_call(MOBILE_CALLER)
+
+    assert response.status_code == 200
+    assert texted_numbers == [MOBILE_CALLER, OWNER, JAMES]
+
+
+def test_sms_when_the_forward_fails(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path, failing=[OWNER])
+
+    response = signed_text(MOBILE_CALLER, "Need a boiler looked at")
+
+    assert response.status_code == 200
+    assert texted_numbers == [JAMES]
+
+
+def test_a_failed_stop_confirmation_still_opts_out(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path, failing=[MOBILE_CALLER])
+
+    response = signed_text(MOBILE_CALLER, "STOP")
+
+    assert response.status_code == 200
+    assert database.is_opted_out(1, MOBILE_CALLER) is True
+    assert texted_numbers == [JAMES, OWNER]
+
+
+def test_no_alert_text_when_alert_mobile_is_not_set(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path, failing=[OWNER])
+    monkeypatch.setattr(settings, "ALERT_MOBILE", None)
+
+    response = signed_call(MOBILE_CALLER)
+
+    assert response.status_code == 200
+    assert texted_numbers == [MOBILE_CALLER]
+
+
+def test_logs_never_include_the_callers_number(monkeypatch, tmp_path, capsys):
+    use_fakes(monkeypatch, tmp_path, failing=[MOBILE_CALLER, OWNER, JAMES])
+
+    signed_call(MOBILE_CALLER)
+
+    assert MOBILE_CALLER not in capsys.readouterr().out
