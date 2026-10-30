@@ -272,3 +272,42 @@ def test_calls_to_an_unknown_number_are_not_logged(monkeypatch, tmp_path):
     client.post("/voice", data=form, headers={"X-Twilio-Signature": signature})
 
     assert read_log() == []
+
+
+def test_stop_opts_out_and_confirms(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path)
+
+    response = signed_text(MOBILE_CALLER, " stop ")
+
+    assert response.status_code == 200
+    # One confirmation to the customer, and the owner sees the message
+    assert texted_numbers == [MOBILE_CALLER, OWNER]
+    assert database.is_opted_out(1, MOBILE_CALLER) is True
+
+
+def test_voice_does_not_text_someone_who_opted_out(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path)
+    database.opt_out(1, MOBILE_CALLER)
+
+    response = signed_call(MOBILE_CALLER)
+
+    assert "Please try again later" in response.text
+    assert texted_numbers == [OWNER]
+    assert read_log()[0].texted is False
+
+
+def test_start_opts_back_in(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    database.opt_out(1, MOBILE_CALLER)
+
+    signed_text(MOBILE_CALLER, "START")
+
+    assert database.is_opted_out(1, MOBILE_CALLER) is False
+
+
+def test_a_normal_reply_does_not_opt_out(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    signed_text(MOBILE_CALLER, "Please stop by on Monday")
+
+    assert database.is_opted_out(1, MOBILE_CALLER) is False

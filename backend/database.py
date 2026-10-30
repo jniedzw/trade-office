@@ -45,6 +45,17 @@ class SkipNumber(SQLModel, table=True):
     number: str
 
 
+class OptOut(SQLModel, table=True):
+    """A customer who replied STOP, so this client must never text them again."""
+
+    __table_args__ = (UniqueConstraint("client_id", "number"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    client_id: int = Field(foreign_key="client.id", index=True)
+    number: str
+    time: datetime = Field(default_factory=now_utc)
+
+
 def create_tables():
     """Create any tables that don't exist yet."""
     SQLModel.metadata.create_all(engine)
@@ -93,3 +104,32 @@ def update_client(client_id, business_name, owner_mobile, text_back_message, act
         client.active = active
         session.add(client)
         session.commit()
+
+
+def is_opted_out(client_id, number):
+    """Return True if this number has replied STOP to this client."""
+    with Session(engine) as session:
+        statement = select(OptOut).where(
+            OptOut.client_id == client_id, OptOut.number == number
+        )
+        return session.exec(statement).first() is not None
+
+
+def opt_out(client_id, number):
+    """Record that this number replied STOP."""
+    if not is_opted_out(client_id, number):
+        with Session(engine) as session:
+            session.add(OptOut(client_id=client_id, number=number))
+            session.commit()
+
+
+def opt_in(client_id, number):
+    """Remove this number's STOP, because they replied START."""
+    with Session(engine) as session:
+        statement = select(OptOut).where(
+            OptOut.client_id == client_id, OptOut.number == number
+        )
+        row = session.exec(statement).first()
+        if row is not None:
+            session.delete(row)
+            session.commit()

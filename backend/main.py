@@ -4,8 +4,20 @@ from twilio.twiml.messaging_response import MessagingResponse
 from twilio.twiml.voice_response import VoiceResponse
 
 import settings
-from database import create_tables, get_client_by_number, is_skipped, log_call
+from database import (
+    create_tables,
+    get_client_by_number,
+    is_opted_out,
+    is_skipped,
+    log_call,
+    opt_in,
+    opt_out,
+)
 from sms import send_sms
+
+# The usual opt-out and opt-in words for text messages.
+STOP_WORDS = {"STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"}
+START_WORDS = {"START", "UNSTOP"}
 
 NOT_IN_SERVICE = "Sorry, this number isn't available right now. Please try again later."
 
@@ -76,7 +88,8 @@ async def voice(request: Request, From: str = Form(), To: str = Form()):
     else:
         # Family and friends on the skip list never get the business text.
         skipped = is_skipped(client.id, From)
-        texted = can_text(From) and not skipped
+        opted_out = is_opted_out(client.id, From)
+        texted = can_text(From) and not skipped and not opted_out
         if texted:
             send_sms(From, client.text_back_message, client.twilio_number)
         message = greeting(client.business_name, texted)
@@ -103,6 +116,17 @@ async def incoming_sms(
     # Texts from the owner will be commands for the assistant later; for now
     # we only pass on customers' messages so their replies aren't lost.
     if client is not None and client.active and From != client.owner_mobile:
+        word = Body.strip().upper()
+        if word in STOP_WORDS:
+            opt_out(client.id, From)
+            reply = f"You won't get any more texts from {client.business_name}. Reply START to opt back in."
+            send_sms(From, reply, client.twilio_number)
+        elif word in START_WORDS:
+            opt_in(client.id, From)
+            reply = f"You're opted back in to texts from {client.business_name}."
+            send_sms(From, reply, client.twilio_number)
+
+        # The owner always sees the message, including a STOP.
         forwarded = forward_message(From, Body)
         send_sms(client.owner_mobile, forwarded, client.twilio_number)
 
