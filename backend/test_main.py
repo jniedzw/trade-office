@@ -441,3 +441,78 @@ def test_logs_never_include_the_callers_number(monkeypatch, tmp_path, capsys):
     signed_call(MOBILE_CALLER)
 
     assert MOBILE_CALLER not in capsys.readouterr().out
+
+
+def add_call(caller, hours_ago, texted=True):
+    """Save a past call, for tests that care about when it happened."""
+    time = database.now_utc() - timedelta(hours=hours_ago)
+    with Session(database.engine) as session:
+        session.add(Call(client_id=1, caller=caller, texted=texted, time=time))
+        session.commit()
+
+
+def test_a_repeat_caller_only_gets_one_text(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path)
+
+    signed_call(MOBILE_CALLER)
+    response = signed_call(MOBILE_CALLER)
+
+    assert "Please try again later" in response.text
+    # The caller once, and the owner hears about both calls
+    assert texted_numbers == [MOBILE_CALLER, OWNER, OWNER]
+    assert [row.texted for row in read_log()] == [True, False]
+
+
+def test_a_caller_can_be_texted_again_after_24_hours(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path)
+    add_call(MOBILE_CALLER, hours_ago=25)
+
+    signed_call(MOBILE_CALLER)
+
+    assert texted_numbers == [MOBILE_CALLER, OWNER]
+
+
+def test_a_failed_text_is_retried_on_the_next_call(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path)
+    add_call(MOBILE_CALLER, hours_ago=1, texted=False)
+
+    signed_call(MOBILE_CALLER)
+
+    assert texted_numbers == [MOBILE_CALLER, OWNER]
+
+
+def test_owner_alerts_stop_after_three_calls(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path)
+
+    for _ in range(6):
+        response = signed_call(MOBILE_CALLER)
+        assert response.status_code == 200
+
+    # One text-back, and the owner hears about the first three calls only
+    assert texted_numbers == [MOBILE_CALLER, OWNER, OWNER, OWNER]
+    assert len(read_log()) == 6  # every call is still logged
+
+
+def test_family_and_friends_alerts_never_stop(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path)
+    database.add_skip_number(1, MOBILE_CALLER)
+
+    for _ in range(6):
+        signed_call(MOBILE_CALLER)
+
+    assert texted_numbers == [OWNER] * 6
+
+
+def test_withheld_alerts_never_stop(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path)
+
+    for _ in range(6):
+        signed_call("anonymous")
+
+    assert texted_numbers == [OWNER] * 6
+
+
+def test_owner_alert_for_a_repeat_caller():
+    assert main.owner_alert(MOBILE_CALLER, False, repeat=True) == (
+        f"Missed call from {MOBILE_CALLER} again. We texted them in the last 24 hours."
+    )

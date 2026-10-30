@@ -112,3 +112,13 @@ def test_delete_old_calls_keeps_opt_outs(monkeypatch, tmp_path):
     database.delete_old_calls()
 
     assert database.is_opted_out(1, "+447700900102") is True
+
+
+def test_recent_calls_are_per_client(monkeypatch, tmp_path):
+    engine = use_temp_database(monkeypatch, tmp_path)
+    add_client(engine, TWILIO_NUMBER)
+    add_client(engine, "+447700900002")
+    database.log_call(1, "+447700900102", True)
+
+    assert len(database.get_recent_calls(1, "+447700900102")) == 1
+    assert database.get_recent_calls(2, "+447700900102") == []
