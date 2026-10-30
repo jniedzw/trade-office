@@ -33,6 +33,8 @@ def use_fakes(monkeypatch, tmp_path, active=True):
         return "SM_FAKE"
 
     monkeypatch.setattr(main, "send_sms", fake_send_sms)
+    # The cleanup job must never reach the real Twilio account from a test.
+    monkeypatch.setattr(main, "count_old_twilio_records", lambda cutoff: (0, 0))
 
     engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}")
     monkeypatch.setattr(database, "engine", engine)
