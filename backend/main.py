@@ -17,8 +17,9 @@ from database import (
     now_utc,
     opt_in,
     opt_out,
+    retention_cutoff,
 )
-from sms import send_sms
+from sms import count_old_twilio_records, send_sms
 
 # The usual opt-out and opt-in words for text messages.
 STOP_WORDS = {"STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"}
@@ -29,7 +30,10 @@ NOT_IN_SERVICE = "Sorry, this number isn't available right now. Please try again
 
 def run_cleanup():
     """Delete old records and note how many went in the server's logs."""
-    print(f"Cleanup: deleted {delete_old_calls()} old calls")
+    # flush=True sends the line straight to Render's logs instead of holding it back.
+    print(f"Cleanup: deleted {delete_old_calls()} old calls", flush=True)
+    messages, calls = count_old_twilio_records(retention_cutoff())
+    print(f"Cleanup dry run: Twilio has {messages} messages, {calls} calls", flush=True)
 
 
 @asynccontextmanager

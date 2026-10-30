@@ -78,10 +78,15 @@ def log_call(client_id, caller, texted):
         session.commit()
 
 
+def retention_cutoff():
+    """Return the moment before which records are too old to keep."""
+    return now_utc() - timedelta(days=RETENTION_DAYS)
+
+
 def delete_old_calls():
     """Delete calls older than RETENTION_DAYS and return how many went."""
     # OptOut rows stay: forgetting a STOP would mean texting that person again.
-    cutoff = now_utc() - timedelta(days=RETENTION_DAYS)
+    cutoff = retention_cutoff()
     with Session(engine) as session:
         old_calls = session.exec(select(Call).where(Call.time < cutoff)).all()
         for call in old_calls:

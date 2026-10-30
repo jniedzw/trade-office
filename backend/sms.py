@@ -17,3 +17,11 @@ def send_sms(to: str, body: str, from_number: str) -> str:
         body=body,
     )
     return message.sid
+
+
+def count_old_twilio_records(cutoff) -> tuple[int, int]:
+    """Return how many messages and calls Twilio holds from before cutoff."""
+    # A dry run: this only counts, so we can check the numbers before deleting anything.
+    messages = client.messages.list(date_sent_before=cutoff)
+    calls = client.calls.list(start_time_before=cutoff)
+    return len(messages), len(calls)
