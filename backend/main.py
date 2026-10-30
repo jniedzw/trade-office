@@ -1,3 +1,6 @@
+from contextlib import asynccontextmanager
+
+from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI, Form, HTTPException, Request, Response
 from twilio.request_validator import RequestValidator
 from twilio.twiml.messaging_response import MessagingResponse
@@ -6,10 +9,12 @@ from twilio.twiml.voice_response import VoiceResponse
 import settings
 from database import (
     create_tables,
+    delete_old_calls,
     get_client_by_number,
     is_opted_out,
     is_skipped,
     log_call,
+    now_utc,
     opt_in,
     opt_out,
 )
@@ -21,7 +26,27 @@ START_WORDS = {"START", "UNSTOP"}
 
 NOT_IN_SERVICE = "Sorry, this number isn't available right now. Please try again later."
 
-app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+
+def run_cleanup():
+    """Delete old records and note how many went in the server's logs."""
+    print(f"Cleanup: deleted {delete_old_calls()} old calls")
+
+
+@asynccontextmanager
+async def lifespan(app):
+    # The code before yield runs at startup, the code after it at shutdown.
+    scheduler = BackgroundScheduler(timezone="UTC")
+    # Every night at 3am, and once now in case a restart skipped last night's run.
+    # It runs in the background, so a cleanup error can't stop calls being answered.
+    scheduler.add_job(
+        run_cleanup, "cron", hour=3, next_run_time=now_utc(), misfire_grace_time=3600
+    )
+    scheduler.start()
+    yield
+    scheduler.shutdown()
+
+
+app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 create_tables()  # Make sure the tables exist when the app starts
 validator = RequestValidator(settings.TWILIO_AUTH_TOKEN)
 

@@ -1,3 +1,6 @@
+import time
+from datetime import timedelta
+
 from fastapi.testclient import TestClient
 from sqlmodel import Session, create_engine, select
 from twilio.request_validator import RequestValidator
@@ -311,3 +314,20 @@ def test_a_normal_reply_does_not_opt_out(monkeypatch, tmp_path):
     signed_text(MOBILE_CALLER, "Please stop by on Monday")
 
     assert database.is_opted_out(1, MOBILE_CALLER) is False
+
+
+def test_cleanup_runs_when_the_app_starts(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    old = database.now_utc() - timedelta(days=366)
+    with Session(database.engine) as session:
+        session.add(Call(client_id=1, caller=MOBILE_CALLER, texted=True, time=old))
+        session.commit()
+
+    # Using "with" runs the startup and shutdown code, which is what starts the job.
+    with TestClient(main.app):
+        for _ in range(50):  # It runs in the background, so give it up to 5 seconds
+            if read_log() == []:
+                break
+            time.sleep(0.1)
+
+    assert read_log() == []
