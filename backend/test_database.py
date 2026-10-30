@@ -1,7 +1,9 @@
-from sqlmodel import Session, create_engine
+from datetime import timedelta
+
+from sqlmodel import Session, create_engine, select
 
 import database
-from database import Client
+from database import Call, Client
 
 # Ofcom's fictional numbers: reserved for testing, never belong to anyone
 TWILIO_NUMBER = "+447700900001"
@@ -77,3 +79,36 @@ def test_update_client_changes_details_and_can_pause(monkeypatch, tmp_path):
     assert client.owner_mobile == "+447700900222"
     assert client.text_back_message == "New message"
     assert client.active is False
+
+
+def add_call_days_ago(engine, days):
+    with Session(engine) as session:
+        time = database.now_utc() - timedelta(days=days)
+        session.add(Call(client_id=1, caller="+447700900102", texted=True, time=time))
+        session.commit()
+
+
+def test_delete_old_calls_only_deletes_old_ones(monkeypatch, tmp_path):
+    engine = use_temp_database(monkeypatch, tmp_path)
+    add_client(engine, TWILIO_NUMBER)
+    add_call_days_ago(engine, 366)
+    add_call_days_ago(engine, 364)
+    add_call_days_ago(engine, 0)
+
+    assert database.delete_old_calls() == 1
+
+    with Session(engine) as session:
+        assert len(session.exec(select(Call)).all()) == 2
+
+
+def test_delete_old_calls_keeps_opt_outs(monkeypatch, tmp_path):
+    engine = use_temp_database(monkeypatch, tmp_path)
+    add_client(engine, TWILIO_NUMBER)
+    with Session(engine) as session:
+        time = database.now_utc() - timedelta(days=1000)
+        session.add(database.OptOut(client_id=1, number="+447700900102", time=time))
+        session.commit()
+
+    database.delete_old_calls()
+
+    assert database.is_opted_out(1, "+447700900102") is True

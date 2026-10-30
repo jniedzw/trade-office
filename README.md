@@ -86,6 +86,7 @@ To receive real calls, expose the app with ngrok and set your Twilio number's "A
 - `/voice` rejects any request without a valid Twilio signature, so the public URL can't be used to send texts.
 - No public endpoint can send a text on demand: an earlier `/test-sms` endpoint was removed once the app went live, because anyone could have triggered texts at our cost. The API docs pages are switched off too.
 - The call log contains callers' numbers, so it is gitignored. Customers are only ever texted about their own enquiry (UK GDPR).
+- Call records are deleted after 12 months by a background job (APScheduler) that runs nightly and at every start. Opt-outs are kept, so a STOP is never forgotten.
 
 ## Roadmap
 

@@ -1,11 +1,14 @@
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlmodel import Field, Session, SQLModel, UniqueConstraint, create_engine, select
 
 # A local SQLite file unless .env says otherwise (on Render it's on the persistent disk).
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///trade_office.db")
 engine = create_engine(DATABASE_URL)
+
+# The privacy policy promises call records are deleted after 12 months.
+RETENTION_DAYS = 365
 
 
 class Client(SQLModel, table=True):
@@ -73,6 +76,18 @@ def log_call(client_id, caller, texted):
     with Session(engine) as session:
         session.add(Call(client_id=client_id, caller=caller, texted=texted))
         session.commit()
+
+
+def delete_old_calls():
+    """Delete calls older than RETENTION_DAYS and return how many went."""
+    # OptOut rows stay: forgetting a STOP would mean texting that person again.
+    cutoff = now_utc() - timedelta(days=RETENTION_DAYS)
+    with Session(engine) as session:
+        old_calls = session.exec(select(Call).where(Call.time < cutoff)).all()
+        for call in old_calls:
+            session.delete(call)
+        session.commit()
+    return len(old_calls)
 
 
 def is_skipped(client_id, number):
