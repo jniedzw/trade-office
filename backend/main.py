@@ -11,6 +11,7 @@ from database import (
     create_tables,
     delete_old_calls,
     get_client_by_number,
+    get_recent_calls,
     is_opted_out,
     is_skipped,
     log_call,
@@ -24,6 +25,10 @@ from sms import count_old_twilio_records, send_sms
 # The usual opt-out and opt-in words for text messages.
 STOP_WORDS = {"STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"}
 START_WORDS = {"START", "UNSTOP"}
+
+# Alerts stop after this many calls from a number we've already texted, so 50 scam
+# calls can't flood the owner's phone, but someone ringing urgently still gets seen.
+MAX_ALERTS = 3
 
 NOT_IN_SERVICE = "Sorry, this number isn't available right now. Please try again later."
 
@@ -97,10 +102,12 @@ def alert_james(client, problem, detail=""):
         try_send(settings.ALERT_MOBILE, message.strip(), client.twilio_number)
 
 
-def owner_alert(caller, texted, skipped=False):
+def owner_alert(caller, texted, skipped=False, repeat=False):
     """Return the text we send the tradesperson about a missed call."""
     if texted:
         return f"Missed call from {caller}. We've texted them back."
+    elif repeat:
+        return f"Missed call from {caller} again. We texted them in the last 24 hours."
     elif skipped:
         return f"Missed call from {caller} (family and friends, so no text was sent)."
     # "+266696687" spells ANONYMOUS on a keypad: Twilio's code for a withheld number.
@@ -142,7 +149,10 @@ async def voice(request: Request, From: str = Form(), To: str = Form()):
         # Family and friends on the skip list never get the business text.
         skipped = is_skipped(client.id, From)
         opted_out = is_opted_out(client.id, From)
-        texted = can_text(From) and not skipped and not opted_out
+        # Only a text that really went out counts, so a failed one gets retried.
+        recent_calls = get_recent_calls(client.id, From)
+        repeat = any(call.texted for call in recent_calls)
+        texted = can_text(From) and not skipped and not opted_out and not repeat
         if texted:
             texted = try_send(From, client.text_back_message, client.twilio_number)
             if not texted:
@@ -150,8 +160,11 @@ async def voice(request: Request, From: str = Form(), To: str = Form()):
         message = greeting(client.business_name, texted)
 
         # If the text failed, this tells the owner to ring the customer instead.
-        alert = owner_alert(From, texted, skipped)
-        if not try_send(client.owner_mobile, alert, client.twilio_number):
+        alert = owner_alert(From, texted, skipped, repeat)
+        too_many = repeat and len(recent_calls) >= MAX_ALERTS
+        if not too_many and not try_send(
+            client.owner_mobile, alert, client.twilio_number
+        ):
             alert_james(client, "couldn't alert the owner.", alert)
 
         try:

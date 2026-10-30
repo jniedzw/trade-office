@@ -9,6 +9,8 @@ engine = create_engine(DATABASE_URL)
 
 # The privacy policy promises call records are deleted after 12 months.
 RETENTION_DAYS = 365
+# A caller only gets one text-back in this many hours, however often they ring.
+REPEAT_HOURS = 24
 
 
 class Client(SQLModel, table=True):
@@ -76,6 +78,16 @@ def log_call(client_id, caller, texted):
     with Session(engine) as session:
         session.add(Call(client_id=client_id, caller=caller, texted=texted))
         session.commit()
+
+
+def get_recent_calls(client_id, caller):
+    """Return this caller's calls to this client in the last REPEAT_HOURS hours."""
+    since = now_utc() - timedelta(hours=REPEAT_HOURS)
+    with Session(engine) as session:
+        statement = select(Call).where(
+            Call.client_id == client_id, Call.caller == caller, Call.time > since
+        )
+        return session.exec(statement).all()
 
 
 def retention_cutoff():
