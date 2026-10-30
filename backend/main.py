@@ -96,7 +96,7 @@ def greeting(business_name, texted):
 def forward_message(sender, body):
     """Return the text we pass on to the tradesperson when a customer replies."""
     if body.strip() == "":
-        return f"From {sender}: (a picture or empty message, check your Twilio logs)"
+        return f"From {sender}: (a picture or empty message, so please ring them back)"
     return f"From {sender}: {body}"
 
 
