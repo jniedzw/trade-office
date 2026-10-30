@@ -73,6 +73,30 @@ def can_text(number):
     return number.startswith("+447")
 
 
+def try_send(to, body, from_number):
+    """Send a text and return True, or False if it failed.
+
+    A failed text must never crash the call, so this catches every error.
+    """
+    try:
+        send_sms(to, body, from_number)
+        return True
+    except Exception as error:
+        # Only the error's type and code: its message can include a customer's number.
+        code = getattr(error, "code", "no code")
+        print(f"Text failed: {type(error).__name__} ({code})", flush=True)
+        return False
+
+
+def alert_james(client, problem, detail=""):
+    """Tell James something failed: always in the logs, and by text if we can."""
+    # detail can hold a customer's number, so it goes in the text but not the logs.
+    print(f"Problem for {client.business_name}: {problem}", flush=True)
+    if settings.ALERT_MOBILE:
+        message = f"Ask Jack problem, {client.business_name}: {problem} {detail}"
+        try_send(settings.ALERT_MOBILE, message.strip(), client.twilio_number)
+
+
 def owner_alert(caller, texted, skipped=False):
     """Return the text we send the tradesperson about a missed call."""
     if texted:
@@ -120,12 +144,20 @@ async def voice(request: Request, From: str = Form(), To: str = Form()):
         opted_out = is_opted_out(client.id, From)
         texted = can_text(From) and not skipped and not opted_out
         if texted:
-            send_sms(From, client.text_back_message, client.twilio_number)
+            texted = try_send(From, client.text_back_message, client.twilio_number)
+            if not texted:
+                alert_james(client, "couldn't text a customer back.")
         message = greeting(client.business_name, texted)
 
-        log_call(client.id, From, texted)
+        # If the text failed, this tells the owner to ring the customer instead.
         alert = owner_alert(From, texted, skipped)
-        send_sms(client.owner_mobile, alert, client.twilio_number)
+        if not try_send(client.owner_mobile, alert, client.twilio_number):
+            alert_james(client, "couldn't alert the owner.", alert)
+
+        try:
+            log_call(client.id, From, texted)
+        except Exception:
+            alert_james(client, "couldn't log a call.")
 
     twiml = VoiceResponse()
     twiml.say(message, voice="Polly.Amy", language="en-GB")
@@ -146,18 +178,21 @@ async def incoming_sms(
     # we only pass on customers' messages so their replies aren't lost.
     if client is not None and client.active and From != client.owner_mobile:
         word = Body.strip().upper()
+        reply = None
         if word in STOP_WORDS:
             opt_out(client.id, From)
             reply = f"You won't get any more texts from {client.business_name}. Reply START to opt back in."
-            send_sms(From, reply, client.twilio_number)
         elif word in START_WORDS:
             opt_in(client.id, From)
             reply = f"You're opted back in to texts from {client.business_name}."
-            send_sms(From, reply, client.twilio_number)
+
+        if reply and not try_send(From, reply, client.twilio_number):
+            alert_james(client, "couldn't confirm a STOP or START.")
 
         # The owner always sees the message, including a STOP.
         forwarded = forward_message(From, Body)
-        send_sms(client.owner_mobile, forwarded, client.twilio_number)
+        if not try_send(client.owner_mobile, forwarded, client.twilio_number):
+            alert_james(client, "couldn't forward a reply.", forwarded)
 
     # An empty reply, so Twilio doesn't send the customer anything back.
     return Response(content=str(MessagingResponse()), media_type="application/xml")
