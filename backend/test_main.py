@@ -38,6 +38,8 @@ def use_fakes(monkeypatch, tmp_path, active=True, failing=()):
 
     monkeypatch.setattr(main, "send_sms", fake_send_sms)
     monkeypatch.setattr(settings, "ALERT_MOBILE", JAMES)
+    monkeypatch.setattr(settings, "WHATSAPP_NUMBER", OUR_NUMBER)
+    monkeypatch.setattr(settings, "WHATSAPP_ALERT_TEMPLATE", "HX_FAKE")
     # The cleanup job must never reach the real Twilio account from a test.
     monkeypatch.setattr(main, "count_old_twilio_records", lambda cutoff: (0, 0))
 
@@ -562,3 +564,177 @@ def test_whatsapp_rejects_missing_signature(monkeypatch, tmp_path):
     response = client.post("/whatsapp", data={"From": f"whatsapp:{OWNER}"})
 
     assert response.status_code == 403
+
+
+def use_whatsapp_alerts(monkeypatch, failing=False):
+    """Opt the test client in, and return a list of WhatsApp alerts "sent"."""
+    sent = []
+
+    def fake_send_whatsapp_alert(to, who, status):
+        if failing:
+            raise RuntimeError("Twilio is unhappy")
+        sent.append((to, who, status))
+        return f"SM_WHATSAPP_{len(sent)}"
+
+    monkeypatch.setattr(main, "send_whatsapp_alert", fake_send_whatsapp_alert)
+    database.set_whatsapp_alerts(1, True)
+    return sent
+
+
+def signed_status(message_sid, status):
+    """Send /whatsapp-status a delivery update, signed like Twilio's."""
+    form = {"MessageSid": message_sid, "MessageStatus": status}
+    validator = RequestValidator(settings.TWILIO_AUTH_TOKEN)
+    signature = validator.compute_signature(
+        settings.PUBLIC_URL + "/whatsapp-status", form
+    )
+    return client.post(
+        "/whatsapp-status", data=form, headers={"X-Twilio-Signature": signature}
+    )
+
+
+def test_alerts_stay_on_sms_until_the_owner_opts_in(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path)
+    sent = use_whatsapp_alerts(monkeypatch)
+    database.set_whatsapp_alerts(1, False)
+
+    signed_call(MOBILE_CALLER)
+
+    assert sent == []
+    assert texted_numbers == [MOBILE_CALLER, OWNER]
+
+
+def test_alerts_stay_on_sms_until_the_template_is_set(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path)
+    sent = use_whatsapp_alerts(monkeypatch)
+    monkeypatch.setattr(settings, "WHATSAPP_ALERT_TEMPLATE", None)
+
+    signed_call(MOBILE_CALLER)
+
+    assert sent == []
+    assert texted_numbers == [MOBILE_CALLER, OWNER]
+
+
+def test_opted_in_owner_gets_a_whatsapp_alert(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path)
+    sent = use_whatsapp_alerts(monkeypatch)
+
+    signed_call(MOBILE_CALLER)
+
+    assert sent == [(OWNER, MOBILE_CALLER, "we texted them back")]
+    assert texted_numbers == [MOBILE_CALLER]  # no SMS alert as well
+
+
+def test_a_rejected_whatsapp_alert_goes_by_sms_straight_away(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path)
+    use_whatsapp_alerts(monkeypatch, failing=True)
+
+    signed_call(MOBILE_CALLER)
+
+    assert texted_numbers == [MOBILE_CALLER, OWNER]
+
+
+def test_a_delivered_alert_needs_no_sms(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path)
+    use_whatsapp_alerts(monkeypatch)
+    signed_call(MOBILE_CALLER)
+
+    response = signed_status("SM_WHATSAPP_1", "delivered")
+    signed_status("SM_WHATSAPP_1", "failed")  # a late update mustn't send an SMS
+
+    assert response.status_code == 204
+    assert texted_numbers == [MOBILE_CALLER]
+    assert database.pop_pending_alert("SM_WHATSAPP_1") is None
+
+
+def test_a_failed_alert_goes_by_sms_once(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path)
+    use_whatsapp_alerts(monkeypatch)
+    signed_call(MOBILE_CALLER)
+
+    signed_status("SM_WHATSAPP_1", "failed")
+    signed_status("SM_WHATSAPP_1", "undelivered")
+
+    assert texted_numbers == [MOBILE_CALLER, OWNER]
+
+
+def test_sent_is_not_treated_as_delivered(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    use_whatsapp_alerts(monkeypatch)
+    signed_call(MOBILE_CALLER)
+
+    signed_status("SM_WHATSAPP_1", "sent")
+
+    assert database.overdue_alert_sids() == []  # still waiting, not forgotten
+    assert database.pop_pending_alert("SM_WHATSAPP_1") is not None
+
+
+def test_an_overdue_alert_goes_by_sms(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path)
+    use_whatsapp_alerts(monkeypatch)
+    signed_call(MOBILE_CALLER)
+    with Session(database.engine) as session:
+        row = session.exec(select(database.PendingAlert)).first()
+        row.time = database.now_utc() - timedelta(minutes=3)
+        session.add(row)
+        session.commit()
+
+    main.send_overdue_alerts()
+    main.send_overdue_alerts()
+
+    assert texted_numbers == [MOBILE_CALLER, OWNER]
+
+
+def test_a_recent_alert_is_left_alone(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path)
+    use_whatsapp_alerts(monkeypatch)
+    signed_call(MOBILE_CALLER)
+
+    main.send_overdue_alerts()
+
+    assert texted_numbers == [MOBILE_CALLER]
+
+
+def test_whatsapp_status_rejects_missing_signature(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    response = client.post(
+        "/whatsapp-status", data={"MessageSid": "SM1", "MessageStatus": "failed"}
+    )
+
+    assert response.status_code == 403
+
+
+def test_alerts_on_and_off_by_whatsapp(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    assert main.whatsapp_reply(f"whatsapp:{OWNER}", " alerts on ").startswith("Done")
+    assert database.whatsapp_alerts_on(1) is True
+
+    main.whatsapp_reply(f"whatsapp:{OWNER}", "ALERTS OFF")
+    assert database.whatsapp_alerts_on(1) is False
+
+
+def test_a_stranger_cant_turn_alerts_on(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    main.whatsapp_reply(f"whatsapp:{MOBILE_CALLER}", "ALERTS ON")
+
+    assert database.whatsapp_alerts_on(1) is False
+
+
+def test_whatsapp_alert_details():
+    assert main.whatsapp_alert_details("anonymous", False, False, False) == (
+        "a withheld number",
+        "no number to text",
+    )
+    assert main.whatsapp_alert_details("+266696687", False, False, False)[0] == (
+        "a withheld number"
+    )
+    assert main.whatsapp_alert_details(MOBILE_CALLER, False, False, True) == (
+        MOBILE_CALLER,
+        "we texted them in the last 24 hours",
+    )
+    assert "ring back" in main.whatsapp_alert_details(
+        "+441514960000", False, False, False
+    )[1]

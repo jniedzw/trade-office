@@ -16,3 +16,6 @@ TWILIO_API_KEY_SECRET = os.environ["TWILIO_API_KEY_SECRET"]
 PUBLIC_URL = os.environ["PUBLIC_URL"]
 # Optional: the mobile that gets a text when something fails.
 ALERT_MOBILE = os.environ.get("ALERT_MOBILE")
+# Optional: WhatsApp alerts stay off until both of these are set.
+WHATSAPP_NUMBER = os.environ.get("WHATSAPP_NUMBER")
+WHATSAPP_ALERT_TEMPLATE = os.environ.get("WHATSAPP_ALERT_TEMPLATE")

@@ -1,3 +1,5 @@
+import json
+
 from twilio.rest import Client
 
 import settings
@@ -15,6 +17,19 @@ def send_sms(to: str, body: str, from_number: str) -> str:
         to=to,
         from_=from_number,
         body=body,
+    )
+    return message.sid
+
+
+def send_whatsapp_alert(to: str, who: str, status: str) -> str:
+    """Send the missed-call template and return Twilio's message ID."""
+    # WhatsApp only lets us message someone first with a template Meta has approved.
+    message = client.messages.create(
+        to=f"whatsapp:{to}",
+        from_=f"whatsapp:{settings.WHATSAPP_NUMBER}",
+        content_sid=settings.WHATSAPP_ALERT_TEMPLATE,
+        content_variables=json.dumps({"1": who, "2": status}),
+        status_callback=f"{settings.PUBLIC_URL}/whatsapp-status",
     )
     return message.sid
 

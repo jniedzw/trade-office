@@ -10,6 +10,7 @@ import settings
 from database import (
     create_tables,
     delete_old_calls,
+    get_client,
     get_client_by_number,
     get_client_by_owner,
     get_recent_calls,
@@ -19,9 +20,14 @@ from database import (
     now_utc,
     opt_in,
     opt_out,
+    overdue_alert_sids,
+    pop_pending_alert,
     retention_cutoff,
+    save_pending_alert,
+    set_whatsapp_alerts,
+    whatsapp_alerts_on,
 )
-from sms import count_old_twilio_records, send_sms
+from sms import count_old_twilio_records, send_sms, send_whatsapp_alert
 
 # The usual opt-out and opt-in words for text messages.
 STOP_WORDS = {"STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"}
@@ -44,6 +50,12 @@ def run_cleanup():
     print(f"Cleanup dry run: Twilio has {messages} messages, {calls} calls", flush=True)
 
 
+def send_overdue_alerts():
+    """Send by SMS any WhatsApp alert that hasn't been delivered in time."""
+    for message_sid in overdue_alert_sids():
+        fall_back_to_sms(message_sid)
+
+
 @asynccontextmanager
 async def lifespan(app):
     # The code before yield runs at startup, the code after it at shutdown.
@@ -53,6 +65,8 @@ async def lifespan(app):
     scheduler.add_job(
         run_cleanup, "cron", hour=3, next_run_time=now_utc(), misfire_grace_time=3600
     )
+    # Twilio tells us when delivery fails, but a phone that's off tells us nothing.
+    scheduler.add_job(send_overdue_alerts, "interval", minutes=1)
     scheduler.start()
     yield
     scheduler.shutdown()
@@ -105,6 +119,52 @@ def alert_james(client, problem, detail=""):
         try_send(settings.ALERT_MOBILE, message.strip(), client.twilio_number)
 
 
+def alert_by_sms(client, alert):
+    """Text the owner an alert, and tell James if that fails."""
+    if not try_send(client.owner_mobile, alert, client.twilio_number):
+        alert_james(client, "couldn't alert the owner.", alert)
+
+
+def fall_back_to_sms(message_sid):
+    """Send a WhatsApp alert by SMS instead, unless it's already been dealt with."""
+    pending = pop_pending_alert(message_sid)
+    if pending is not None:
+        client_id, alert = pending
+        alert_by_sms(get_client(client_id), alert)
+
+
+def whatsapp_alert_details(caller, texted, skipped, repeat):
+    """Return the two gaps in the WhatsApp template: who rang, and what happened."""
+    withheld = not caller.startswith("+") or caller == "+266696687"
+    who = "a withheld number" if withheld else caller
+    if texted:
+        status = "we texted them back"
+    elif repeat:
+        status = "we texted them in the last 24 hours"
+    elif skipped:
+        status = "family and friends, so no text was sent"
+    elif withheld:
+        status = "no number to text"
+    else:
+        status = "we couldn't text them, so please ring back"
+    return who, status
+
+
+def send_owner_alert(client, caller, texted, skipped, repeat):
+    """Alert the owner on WhatsApp if they've opted in, otherwise by SMS."""
+    alert = owner_alert(caller, texted, skipped, repeat)
+    use_whatsapp = settings.WHATSAPP_NUMBER and settings.WHATSAPP_ALERT_TEMPLATE
+    if use_whatsapp and whatsapp_alerts_on(client.id):
+        try:
+            who, status = whatsapp_alert_details(caller, texted, skipped, repeat)
+            message_sid = send_whatsapp_alert(client.owner_mobile, who, status)
+            save_pending_alert(message_sid, client.id, alert)
+            return
+        except Exception as error:
+            print(f"WhatsApp alert failed: {type(error).__name__}", flush=True)
+    alert_by_sms(client, alert)
+
+
 def owner_alert(caller, texted, skipped=False, repeat=False):
     """Return the text we send the tradesperson about a missed call."""
     if texted:
@@ -127,12 +187,20 @@ def greeting(business_name, texted):
     return f"Sorry, {business_name} can't take your call right now. Please try again later."
 
 
-def whatsapp_reply(sender):
-    """Return our reply to a WhatsApp message."""
+def whatsapp_reply(sender, body=""):
+    """Handle a WhatsApp message and return our reply."""
     # Twilio writes WhatsApp numbers as "whatsapp:+447...", so take that off first.
     client = get_client_by_owner(sender.removeprefix("whatsapp:"))
     if client is None or not client.active:
         return WHATSAPP_NOT_A_CLIENT
+
+    command = body.strip().upper()
+    if command == "ALERTS ON":
+        set_whatsapp_alerts(client.id, True)
+        return "Done. Missed-call alerts will come here. Send ALERTS OFF for texts."
+    if command == "ALERTS OFF":
+        set_whatsapp_alerts(client.id, False)
+        return "Done. Missed-call alerts will come by text."
     return f"Hi, it's Jack. {client.business_name} is connected to WhatsApp."
 
 
@@ -172,12 +240,9 @@ async def voice(request: Request, From: str = Form(), To: str = Form()):
         message = greeting(client.business_name, texted)
 
         # If the text failed, this tells the owner to ring the customer instead.
-        alert = owner_alert(From, texted, skipped, repeat)
         too_many = repeat and len(recent_calls) >= MAX_ALERTS
-        if not too_many and not try_send(
-            client.owner_mobile, alert, client.twilio_number
-        ):
-            alert_james(client, "couldn't alert the owner.", alert)
+        if not too_many:
+            send_owner_alert(client, From, texted, skipped, repeat)
 
         try:
             log_call(client.id, From, texted)
@@ -224,11 +289,28 @@ async def incoming_sms(
 
 
 @app.post("/whatsapp")
-async def incoming_whatsapp(request: Request, From: str = Form()):
+async def incoming_whatsapp(
+    request: Request, From: str = Form(), Body: str = Form("")
+):
     # Twilio calls this when someone messages our WhatsApp number.
     await check_twilio_signature(request)
 
     # Replying in the response sends it straight back through WhatsApp.
     twiml = MessagingResponse()
-    twiml.message(whatsapp_reply(From))
+    twiml.message(whatsapp_reply(From, Body))
     return Response(content=str(twiml), media_type="application/xml")
+
+
+@app.post("/whatsapp-status")
+async def whatsapp_status(
+    request: Request, MessageSid: str = Form(), MessageStatus: str = Form()
+):
+    # Twilio calls this as a WhatsApp alert moves along: sent, delivered, read...
+    await check_twilio_signature(request)
+
+    if MessageStatus in ("delivered", "read"):
+        pop_pending_alert(MessageSid)
+    elif MessageStatus in ("failed", "undelivered"):
+        fall_back_to_sms(MessageSid)
+
+    return Response(status_code=204)
