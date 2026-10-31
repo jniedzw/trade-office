@@ -45,6 +45,7 @@ sequenceDiagram
 | GET | `/` | Health check |
 | POST | `/voice` | Twilio webhook for incoming calls |
 | POST | `/sms` | Twilio webhook for incoming texts: forwards customers' replies to the tradesperson |
+| POST | `/whatsapp` | Twilio webhook for incoming WhatsApp messages: recognises tradespeople by their mobile number |
 
 ## Project layout
 

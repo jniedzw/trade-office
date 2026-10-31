@@ -11,6 +11,7 @@ from database import (
     create_tables,
     delete_old_calls,
     get_client_by_number,
+    get_client_by_owner,
     get_recent_calls,
     is_opted_out,
     is_skipped,
@@ -29,6 +30,8 @@ START_WORDS = {"START", "UNSTOP"}
 # Alerts stop after this many calls from a number we've already texted, so 50 scam
 # calls can't flood the owner's phone, but someone ringing urgently still gets seen.
 MAX_ALERTS = 3
+
+WHATSAPP_NOT_A_CLIENT = "Hi, this is Ask Jack, admin for UK tradespeople. See askjack.uk or email hello@askjack.uk."
 
 NOT_IN_SERVICE = "Sorry, this number isn't available right now. Please try again later."
 
@@ -124,6 +127,15 @@ def greeting(business_name, texted):
     return f"Sorry, {business_name} can't take your call right now. Please try again later."
 
 
+def whatsapp_reply(sender):
+    """Return our reply to a WhatsApp message."""
+    # Twilio writes WhatsApp numbers as "whatsapp:+447...", so take that off first.
+    client = get_client_by_owner(sender.removeprefix("whatsapp:"))
+    if client is None or not client.active:
+        return WHATSAPP_NOT_A_CLIENT
+    return f"Hi, it's Jack. {client.business_name} is connected to WhatsApp."
+
+
 def forward_message(sender, body):
     """Return the text we pass on to the tradesperson when a customer replies."""
     if body.strip() == "":
@@ -209,3 +221,14 @@ async def incoming_sms(
 
     # An empty reply, so Twilio doesn't send the customer anything back.
     return Response(content=str(MessagingResponse()), media_type="application/xml")
+
+
+@app.post("/whatsapp")
+async def incoming_whatsapp(request: Request, From: str = Form()):
+    # Twilio calls this when someone messages our WhatsApp number.
+    await check_twilio_signature(request)
+
+    # Replying in the response sends it straight back through WhatsApp.
+    twiml = MessagingResponse()
+    twiml.message(whatsapp_reply(From))
+    return Response(content=str(twiml), media_type="application/xml")
