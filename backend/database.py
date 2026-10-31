@@ -9,6 +9,8 @@ engine = create_engine(DATABASE_URL)
 
 # The privacy policy promises call records are deleted after 12 months.
 RETENTION_DAYS = 365
+# A WhatsApp alert that isn't delivered within this many minutes goes by SMS instead.
+ALERT_WAIT_MINUTES = 2
 # A caller only gets one text-back in this many hours, however often they ring.
 REPEAT_HOURS = 24
 
@@ -61,6 +63,24 @@ class OptOut(SQLModel, table=True):
     time: datetime = Field(default_factory=now_utc)
 
 
+class WhatsAppAlerts(SQLModel, table=True):
+    """A client who opted in to missed-call alerts on WhatsApp."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    client_id: int = Field(foreign_key="client.id", unique=True)
+    time: datetime = Field(default_factory=now_utc)
+
+
+class PendingAlert(SQLModel, table=True):
+    """A WhatsApp alert we haven't seen delivered yet, kept so SMS can take over."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    message_sid: str = Field(unique=True, index=True)
+    client_id: int = Field(foreign_key="client.id")
+    body: str
+    time: datetime = Field(default_factory=now_utc)
+
+
 def create_tables():
     """Create any tables that don't exist yet."""
     SQLModel.metadata.create_all(engine)
@@ -85,6 +105,59 @@ def get_client_by_owner(owner_mobile):
     with Session(engine) as session:
         statement = select(Client).where(Client.owner_mobile == owner_mobile)
         return session.exec(statement).first()
+
+
+def whatsapp_alerts_on(client_id):
+    """Return True if this client opted in to WhatsApp alerts."""
+    with Session(engine) as session:
+        statement = select(WhatsAppAlerts).where(WhatsAppAlerts.client_id == client_id)
+        return session.exec(statement).first() is not None
+
+
+def set_whatsapp_alerts(client_id, on):
+    """Turn this client's WhatsApp alerts on or off."""
+    with Session(engine) as session:
+        statement = select(WhatsAppAlerts).where(WhatsAppAlerts.client_id == client_id)
+        row = session.exec(statement).first()
+        if on and row is None:
+            session.add(WhatsAppAlerts(client_id=client_id))
+        elif not on and row is not None:
+            session.delete(row)
+        session.commit()
+
+
+def save_pending_alert(message_sid, client_id, body):
+    """Remember a WhatsApp alert until it's delivered."""
+    with Session(engine) as session:
+        session.add(PendingAlert(message_sid=message_sid, client_id=client_id, body=body))
+        session.commit()
+
+
+def pop_pending_alert(message_sid):
+    """Remove this alert and return its client ID and body, or None if it's gone."""
+    with Session(engine) as session:
+        statement = select(PendingAlert).where(PendingAlert.message_sid == message_sid)
+        row = session.exec(statement).first()
+        if row is None:
+            return None
+        result = (row.client_id, row.body)
+        session.delete(row)
+        session.commit()
+        return result
+
+
+def overdue_alert_sids():
+    """Return the IDs of WhatsApp alerts that have waited too long."""
+    cutoff = now_utc() - timedelta(minutes=ALERT_WAIT_MINUTES)
+    with Session(engine) as session:
+        statement = select(PendingAlert).where(PendingAlert.time < cutoff)
+        return [row.message_sid for row in session.exec(statement).all()]
+
+
+def get_client(client_id):
+    """Return the client with this ID, or None."""
+    with Session(engine) as session:
+        return session.get(Client, client_id)
 
 
 def get_recent_calls(client_id, caller):
