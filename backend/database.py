@@ -80,6 +80,13 @@ def log_call(client_id, caller, texted):
         session.commit()
 
 
+def get_client_by_owner(owner_mobile):
+    """Return the client with this mobile, or None if there isn't one."""
+    with Session(engine) as session:
+        statement = select(Client).where(Client.owner_mobile == owner_mobile)
+        return session.exec(statement).first()
+
+
 def get_recent_calls(client_id, caller):
     """Return this caller's calls to this client in the last REPEAT_HOURS hours."""
     since = now_utc() - timedelta(hours=REPEAT_HOURS)

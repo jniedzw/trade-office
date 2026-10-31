@@ -516,3 +516,49 @@ def test_owner_alert_for_a_repeat_caller():
     assert main.owner_alert(MOBILE_CALLER, False, repeat=True) == (
         f"Missed call from {MOBILE_CALLER} again. We texted them in the last 24 hours."
     )
+
+
+def signed_whatsapp(sender):
+    """Send /whatsapp a fake message, signed the same way Twilio signs real ones."""
+    form = {"From": f"whatsapp:{sender}", "To": f"whatsapp:{OUR_NUMBER}", "Body": "Hi"}
+    validator = RequestValidator(settings.TWILIO_AUTH_TOKEN)
+    signature = validator.compute_signature(settings.PUBLIC_URL + "/whatsapp", form)
+    return client.post(
+        "/whatsapp", data=form, headers={"X-Twilio-Signature": signature}
+    )
+
+
+def test_whatsapp_recognises_a_client(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path)
+
+    response = signed_whatsapp(OWNER)
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/xml"
+    assert "Test Plumbing is connected" in response.text
+    assert texted_numbers == []  # the reply goes back in the response, not by SMS
+
+
+def test_whatsapp_for_someone_who_is_not_a_client(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    response = signed_whatsapp(MOBILE_CALLER)
+
+    assert "askjack.uk" in response.text
+    assert "Test Plumbing" not in response.text
+
+
+def test_whatsapp_for_a_paused_client(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path, active=False)
+
+    response = signed_whatsapp(OWNER)
+
+    assert "Test Plumbing" not in response.text
+
+
+def test_whatsapp_rejects_missing_signature(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    response = client.post("/whatsapp", data={"From": f"whatsapp:{OWNER}"})
+
+    assert response.status_code == 403
