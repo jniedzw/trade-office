@@ -15,8 +15,11 @@ Pick out:
 - customer_name: who the quote is for, as they wrote it.
 - title: a short name for the job, like "Bathroom refit".
 - job_code: 2 to 4 capital letters for the job, like BR for bathroom refit.
-- price: the total price copied exactly as they wrote it, like "1250" or "£1,250.50".
-  Never work out, round or guess a price. If there isn't one, use null.
+- price: the total price as a number only, with no £ sign, commas or words,
+  like "1250" or "1250.50". It must be a number they wrote.
+  Never work out, round or guess a price. Use null if there isn't one, if it's a
+  range like "500-600", if they say they're not sure, or if they add extras with
+  no price, like "plus parts".
 - lines: each piece of work they mention, as short lines in their order.
 If there's no customer name, use an empty string."""
 
