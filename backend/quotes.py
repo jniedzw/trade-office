@@ -93,23 +93,24 @@ def reference(prefix, job_code, day):
     return f"{prefix}-{job_code}-{day.strftime('%d%m%y')}"
 
 
-def link_signature(quote_id, expires):
+def link_signature(kind, item_id, expires):
     """Return a code that only someone with the secret can make for this link."""
-    message = f"{quote_id}:{expires}".encode()
+    # kind is "quote" or "invoice", so a quote's code can't open invoice 1 as well.
+    message = f"{kind}:{item_id}:{expires}".encode()
     secret = settings.QUOTE_LINK_SECRET.encode()
     return hmac.new(secret, message, hashlib.sha256).hexdigest()
 
 
-def quote_link(quote_id, now):
-    """Return a private link to the quote's PDF that stops working after LINK_DAYS."""
+def signed_link(kind, item_id, now):
+    """Return a private link to a quote's or invoice's PDF that stops working after LINK_DAYS."""
     expires = int((now + timedelta(days=LINK_DAYS)).timestamp())
-    signature = link_signature(quote_id, expires)
-    return f"{settings.PUBLIC_URL}/quotes/{quote_id}.pdf?expires={expires}&sig={signature}"
+    signature = link_signature(kind, item_id, expires)
+    return f"{settings.PUBLIC_URL}/{kind}s/{item_id}.pdf?expires={expires}&sig={signature}"
 
 
-def link_is_valid(quote_id, expires, signature, now):
-    """Return True if the link was made by us for this quote and hasn't run out."""
+def link_is_valid(kind, item_id, expires, signature, now):
+    """Return True if we made this link for this item and it hasn't run out."""
     if not settings.QUOTE_LINK_SECRET or expires < now.timestamp():
         return False
     # compare_digest takes the same time whatever matches, so the code can't be guessed bit by bit.
-    return hmac.compare_digest(signature, link_signature(quote_id, expires))
+    return hmac.compare_digest(signature, link_signature(kind, item_id, expires))

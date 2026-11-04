@@ -287,6 +287,12 @@ def finish_quote(client_id, quote_id):
         return quote
 
 
+def get_invoice(invoice_id):
+    """Return the invoice with this ID, or None."""
+    with Session(engine) as session:
+        return session.get(Invoice, invoice_id)
+
+
 def get_invoice_for_quote(quote_id):
     """Return the invoice already made from this quote, or None."""
     with Session(engine) as session:

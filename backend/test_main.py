@@ -796,7 +796,7 @@ def path_of(link):
 
 def test_a_signed_link_downloads_the_quote(monkeypatch, tmp_path):
     use_quote_links(monkeypatch, tmp_path)
-    link = quotes.quote_link(1, database.now_utc())
+    link = quotes.signed_link("quote", 1, database.now_utc())
 
     response = client.get(path_of(link))
 
@@ -808,7 +808,7 @@ def test_a_signed_link_downloads_the_quote(monkeypatch, tmp_path):
 def test_a_link_cant_be_changed_to_another_quote(monkeypatch, tmp_path):
     use_quote_links(monkeypatch, tmp_path)
     database.save_quote(1, "Mr Smith", "Boiler service", "BS", 8500)
-    link = quotes.quote_link(1, database.now_utc())
+    link = quotes.signed_link("quote", 1, database.now_utc())
 
     response = client.get(path_of(link).replace("/quotes/1.pdf", "/quotes/2.pdf"))
 
@@ -818,7 +818,7 @@ def test_a_link_cant_be_changed_to_another_quote(monkeypatch, tmp_path):
 def test_an_old_link_stops_working(monkeypatch, tmp_path):
     use_quote_links(monkeypatch, tmp_path)
     eight_days_ago = database.now_utc() - timedelta(days=8)
-    link = quotes.quote_link(1, eight_days_ago)
+    link = quotes.signed_link("quote", 1, eight_days_ago)
 
     assert client.get(path_of(link)).status_code == 403
 
@@ -831,7 +831,7 @@ def test_a_link_without_a_signature_is_refused(monkeypatch, tmp_path):
 
 def test_no_links_work_without_a_secret(monkeypatch, tmp_path):
     use_quote_links(monkeypatch, tmp_path)
-    link = quotes.quote_link(1, database.now_utc())
+    link = quotes.signed_link("quote", 1, database.now_utc())
     monkeypatch.setattr(settings, "QUOTE_LINK_SECRET", None)
 
     assert client.get(path_of(link)).status_code == 403
@@ -966,7 +966,9 @@ def test_invoice_saves_an_invoice(monkeypatch, tmp_path):
 
     text, link = main.whatsapp_reply(f"whatsapp:{OWNER}", "invoice 1" + ADDRESS)
 
-    assert text == "Invoice 1 saved for Mrs Jones, £1,250.50."
+    assert text == "Invoice 1 saved for Mrs Jones, £1,250.50. Forward this PDF to them."
+    assert link.startswith(f"{settings.PUBLIC_URL}/invoices/1.pdf?expires=")
+    assert client.get(path_of(link)).content.startswith(b"%PDF-")
     invoice = database.get_invoice_for_quote(1)
     assert invoice.customer_address == "12 Test Road\nLiverpool L1 0AA"
 
@@ -988,7 +990,7 @@ def test_invoice_numbers_go_up_by_one(monkeypatch, tmp_path):
     main.whatsapp_reply(f"whatsapp:{OWNER}", "INVOICE 1" + ADDRESS)
     text, link = main.whatsapp_reply(f"whatsapp:{OWNER}", "INVOICE 2" + ADDRESS)
 
-    assert text == "Invoice 2 saved for Mr Smith, £85.00."
+    assert text.startswith("Invoice 2 saved for Mr Smith, £85.00.")
 
 
 def test_invoice_needs_an_address(monkeypatch, tmp_path):
@@ -1039,3 +1041,13 @@ def test_a_client_cant_invoice_another_clients_quote(monkeypatch, tmp_path):
 
     assert text == "There's no quote 1 for Other Plumbing."
     assert database.get_invoice_for_quote(1) is None
+
+
+def test_a_quote_link_cant_open_an_invoice(monkeypatch, tmp_path):
+    use_final_quote(monkeypatch, tmp_path)
+    main.whatsapp_reply(f"whatsapp:{OWNER}", "INVOICE 1" + ADDRESS)
+    quote_link = quotes.signed_link("quote", 1, database.now_utc())
+
+    response = client.get(path_of(quote_link).replace("/quotes/", "/invoices/"))
+
+    assert response.status_code == 403

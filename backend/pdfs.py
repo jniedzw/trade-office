@@ -1,5 +1,6 @@
 """Quote PDFs in the style of a smart trade quote: dark header, one accent colour."""
 
+from datetime import timedelta
 from io import BytesIO
 from xml.sax.saxutils import escape
 
@@ -110,9 +111,7 @@ def make_quote_pdf(quote, business_name, lines=(), details=None):
     details is the client's BusinessDetails, or None if they haven't been added.
     """
     accent = colors.HexColor(details.brand_colour if details else DEFAULT_ACCENT)
-    letters = details.ref_letters if details else "Q"
-    # The quote's ID on the end keeps two jobs on the same day apart.
-    ref = f"{reference(letters, quote.job_code, quote.time)}-{quote.id}"
+    ref = quote_reference(quote, details.ref_letters if details else "Q")
     page = {
         "accent": accent,
         "business_name": business_name,
@@ -132,17 +131,60 @@ def make_quote_pdf(quote, business_name, lines=(), details=None):
         days = details.payment_days
         content += section("PAYMENT", [f"Payment due within {days} days of the invoice."], accent, SMALL)
 
+    return build(f"Quote {ref}", page, content)
+
+
+def build(title, page, content):
+    """Return the PDF made from content, with page drawn on every page."""
     # Built in memory, not saved: the server's disk is no place for customer files.
     buffer = BytesIO()
     document = SimpleDocTemplate(
-        buffer, pagesize=A4, title=f"Quote {ref}",
+        buffer, pagesize=A4, title=title,
         leftMargin=MARGIN, rightMargin=MARGIN,
         topMargin=HEADER_HEIGHT + 10 * mm, bottomMargin=24 * mm,
     )
-    # reportlab calls draw_page for every page, so long quotes keep the header.
+    # reportlab calls draw_page for every page, so long documents keep the header.
     document.build(
         content,
         onFirstPage=lambda canvas, doc: draw_page(canvas, doc, page),
         onLaterPages=lambda canvas, doc: draw_page(canvas, doc, page),
     )
     return buffer.getvalue()
+
+
+def quote_reference(quote, letters):
+    """Return a quote's reference, like DPL-BR-041126-7."""
+    # The quote's ID on the end keeps two jobs on the same day apart.
+    return f"{reference(letters, quote.job_code, quote.time)}-{quote.id}"
+
+
+def make_invoice_pdf(invoice, quote, business_name, lines, details):
+    """Return the invoice for a final quote as a PDF, as bytes ready to send.
+
+    Unlike a quote, an invoice always needs details, for the bank details.
+    """
+    accent = colors.HexColor(details.brand_colour)
+    number = f"INV-{details.ref_letters}-{invoice.number:04}"
+    due = uk_date(invoice.time + timedelta(days=details.payment_days))
+    page = {
+        "accent": accent,
+        "business_name": business_name,
+        "legal_name": details.legal_name,
+        "heading": "INVOICE",
+        "lines": [uk_date(invoice.time), f"No: {number}", f"Due: {due}"],
+        "draft": False,
+    }
+
+    content = [Paragraph(escape(quote.title.upper()), TITLE), Spacer(1, 4 * mm)]
+    content += section("INVOICE TO", [f"{quote.customer_name}\n{invoice.customer_address}"], accent)
+    content += section("FROM", [f"{details.legal_name}\n{details.address}"], accent)
+    content += section("WORK CARRIED OUT", lines or [quote.title], accent)
+    content += [total_box("AMOUNT DUE", quote.total_pence, "", accent), Spacer(1, 7 * mm)]
+    payment = [
+        f"Please pay by {due}.",
+        details.bank_details,
+        f"Please use {number} as the payment reference.",
+        f"Quote ref: {quote_reference(quote, details.ref_letters)}",
+    ]
+    content += section("PAYMENT", payment, accent, SMALL)
+    return build(f"Invoice {number}", page, content)

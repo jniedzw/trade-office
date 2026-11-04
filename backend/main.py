@@ -13,6 +13,7 @@ from database import (
     delete_old_calls,
     finish_quote,
     get_business_details,
+    get_invoice,
     get_invoice_for_quote,
     get_client,
     get_client_by_number,
@@ -35,13 +36,13 @@ from database import (
     set_whatsapp_alerts,
     whatsapp_alerts_on,
 )
-from pdfs import make_quote_pdf
+from pdfs import make_invoice_pdf, make_quote_pdf
 from quotes import (
     QUOTE_HELP,
     link_is_valid,
     money,
     parse_quote,
-    quote_link,
+    signed_link,
 )
 from sms import count_old_twilio_records, send_sms, send_whatsapp_alert
 
@@ -217,15 +218,15 @@ def quote_reply(client, details):
         f"{quote['customer_name']}, {money(quote['total_pence'])}, {lines} of work. "
         f"Check it, then send FINAL {quote_id} for the version to send."
     )
-    return with_pdf(text, quote_id)
+    return with_pdf(text, "quote", quote_id)
 
 
-def with_pdf(text, quote_id):
-    """Return our reply with a link to the quote's PDF, if links can work."""
+def with_pdf(text, kind, item_id):
+    """Return our reply with a link to the PDF, if links can work."""
     # Without the secret no link would work, so send the words on their own.
     if not settings.QUOTE_LINK_SECRET:
         return text, None
-    return text, quote_link(quote_id, now_utc())
+    return text, signed_link(kind, item_id, now_utc())
 
 
 def final_reply(client, number):
@@ -236,7 +237,9 @@ def final_reply(client, number):
     if quote is None:
         return f"There's no quote {number} for {client.business_name}.", None
     return with_pdf(
-        f"Quote {quote.id} is final. Forward this PDF to {quote.customer_name}.", quote.id
+        f"Quote {quote.id} is final. Forward this PDF to {quote.customer_name}.",
+        "quote",
+        quote.id,
     )
 
 
@@ -263,10 +266,11 @@ def invoice_reply(client, details):
 
     # Sending INVOICE twice for one quote gives the same invoice, not a second one.
     invoice = get_invoice_for_quote(quote.id) or save_invoice(client.id, quote.id, address)
-    return (
+    text = (
         f"Invoice {invoice.number} saved for {quote.customer_name}, "
-        f"{money(quote.total_pence)}."
-    ), None
+        f"{money(quote.total_pence)}. Forward this PDF to them."
+    )
+    return with_pdf(text, "invoice", invoice.id)
 
 
 def whatsapp_reply(sender, body=""):
@@ -397,7 +401,7 @@ async def incoming_whatsapp(
 @app.get("/quotes/{quote_id}.pdf")
 def quote_pdf(quote_id: int, expires: int = 0, sig: str = ""):
     # Anyone can reach this address, so only a link we signed gets the PDF.
-    if not link_is_valid(quote_id, expires, sig, now_utc()):
+    if not link_is_valid("quote", quote_id, expires, sig, now_utc()):
         raise HTTPException(status_code=403, detail="This link isn't valid")
     quote = get_quote(quote_id)
     if quote is None:
@@ -405,6 +409,22 @@ def quote_pdf(quote_id: int, expires: int = 0, sig: str = ""):
     business_name = get_client(quote.client_id).business_name
     details = get_business_details(quote.client_id)
     pdf = make_quote_pdf(quote, business_name, get_quote_lines(quote_id), details)
+    return Response(content=pdf, media_type="application/pdf")
+
+
+@app.get("/invoices/{invoice_id}.pdf")
+def invoice_pdf(invoice_id: int, expires: int = 0, sig: str = ""):
+    # Signed like quote links, but only for invoices.
+    if not link_is_valid("invoice", invoice_id, expires, sig, now_utc()):
+        raise HTTPException(status_code=403, detail="This link isn't valid")
+    invoice = get_invoice(invoice_id)
+    if invoice is None:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    quote = get_quote(invoice.quote_id)
+    business_name = get_client(invoice.client_id).business_name
+    details = get_business_details(invoice.client_id)
+    lines = get_quote_lines(quote.id)
+    pdf = make_invoice_pdf(invoice, quote, business_name, lines, details)
     return Response(content=pdf, media_type="application/pdf")
 
 
