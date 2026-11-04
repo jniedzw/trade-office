@@ -7,6 +7,7 @@ from twilio.request_validator import RequestValidator
 
 import database
 import main
+import quotes
 import settings
 from database import Call, Client
 
@@ -769,3 +770,58 @@ def test_a_stranger_cant_make_a_quote(monkeypatch, tmp_path):
 
     assert reply == main.WHATSAPP_NOT_A_CLIENT
     assert database.get_quote(1) is None
+
+
+def use_quote_links(monkeypatch, tmp_path):
+    """Set a test secret and save one draft quote, ID 1."""
+    use_fakes(monkeypatch, tmp_path)
+    monkeypatch.setattr(settings, "QUOTE_LINK_SECRET", "test-secret")
+    database.save_quote(1, "Mrs Jones", "Bathroom refit", "BR", 125050)
+
+
+def path_of(link):
+    """Return the link without PUBLIC_URL, which is how TestClient wants it."""
+    return link.removeprefix(settings.PUBLIC_URL)
+
+
+def test_a_signed_link_downloads_the_quote(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+    link = quotes.quote_link(1, database.now_utc())
+
+    response = client.get(path_of(link))
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.content.startswith(b"%PDF-")
+
+
+def test_a_link_cant_be_changed_to_another_quote(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+    database.save_quote(1, "Mr Smith", "Boiler service", "BS", 8500)
+    link = quotes.quote_link(1, database.now_utc())
+
+    response = client.get(path_of(link).replace("/quotes/1.pdf", "/quotes/2.pdf"))
+
+    assert response.status_code == 403
+
+
+def test_an_old_link_stops_working(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+    eight_days_ago = database.now_utc() - timedelta(days=8)
+    link = quotes.quote_link(1, eight_days_ago)
+
+    assert client.get(path_of(link)).status_code == 403
+
+
+def test_a_link_without_a_signature_is_refused(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+
+    assert client.get("/quotes/1.pdf").status_code == 403
+
+
+def test_no_links_work_without_a_secret(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+    link = quotes.quote_link(1, database.now_utc())
+    monkeypatch.setattr(settings, "QUOTE_LINK_SECRET", None)
+
+    assert client.get(path_of(link)).status_code == 403

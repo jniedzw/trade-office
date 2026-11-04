@@ -1,5 +1,8 @@
 """Quotes: reading them from WhatsApp, and turning them into PDFs."""
 
+import hashlib
+import hmac
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from xml.sax.saxutils import escape
@@ -10,7 +13,12 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
+import settings
+
 QUOTE_HELP = "To make a quote, send: QUOTE Mrs Jones | Bathroom refit | BR | 1250.50"
+
+# How long a quote PDF link works for.
+LINK_DAYS = 7
 
 BODY = ParagraphStyle("body", fontName="Helvetica", fontSize=11, leading=16)
 GREY = ParagraphStyle("grey", parent=BODY, textColor=colors.HexColor("#666666"))
@@ -92,3 +100,25 @@ def make_quote_pdf(quote, business_name):
     document = SimpleDocTemplate(buffer, pagesize=A4, title=f"Quote {ref}")
     document.build(content)
     return buffer.getvalue()
+
+
+def link_signature(quote_id, expires):
+    """Return a code that only someone with the secret can make for this link."""
+    message = f"{quote_id}:{expires}".encode()
+    secret = settings.QUOTE_LINK_SECRET.encode()
+    return hmac.new(secret, message, hashlib.sha256).hexdigest()
+
+
+def quote_link(quote_id, now):
+    """Return a private link to the quote's PDF that stops working after LINK_DAYS."""
+    expires = int((now + timedelta(days=LINK_DAYS)).timestamp())
+    signature = link_signature(quote_id, expires)
+    return f"{settings.PUBLIC_URL}/quotes/{quote_id}.pdf?expires={expires}&sig={signature}"
+
+
+def link_is_valid(quote_id, expires, signature, now):
+    """Return True if the link was made by us for this quote and hasn't run out."""
+    if not settings.QUOTE_LINK_SECRET or expires < now.timestamp():
+        return False
+    # compare_digest takes the same time whatever matches, so the code can't be guessed bit by bit.
+    return hmac.compare_digest(signature, link_signature(quote_id, expires))

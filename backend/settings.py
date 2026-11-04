@@ -19,3 +19,5 @@ ALERT_MOBILE = os.environ.get("ALERT_MOBILE")
 # Optional: WhatsApp alerts stay off until both of these are set.
 WHATSAPP_NUMBER = os.environ.get("WHATSAPP_NUMBER")
 WHATSAPP_ALERT_TEMPLATE = os.environ.get("WHATSAPP_ALERT_TEMPLATE")
+# Optional: signs quote PDF links. Quote PDFs can't be downloaded until it's set.
+QUOTE_LINK_SECRET = os.environ.get("QUOTE_LINK_SECRET")

@@ -13,6 +13,7 @@ from database import (
     get_client,
     get_client_by_number,
     get_client_by_owner,
+    get_quote,
     get_recent_calls,
     is_opted_out,
     is_skipped,
@@ -28,7 +29,7 @@ from database import (
     set_whatsapp_alerts,
     whatsapp_alerts_on,
 )
-from quotes import QUOTE_HELP, money, parse_quote
+from quotes import QUOTE_HELP, link_is_valid, make_quote_pdf, money, parse_quote
 from sms import count_old_twilio_records, send_sms, send_whatsapp_alert
 
 # The usual opt-out and opt-in words for text messages.
@@ -315,6 +316,18 @@ async def incoming_whatsapp(
     twiml = MessagingResponse()
     twiml.message(whatsapp_reply(From, Body))
     return Response(content=str(twiml), media_type="application/xml")
+
+
+@app.get("/quotes/{quote_id}.pdf")
+def quote_pdf(quote_id: int, expires: int = 0, sig: str = ""):
+    # Anyone can reach this address, so only a link we signed gets the PDF.
+    if not link_is_valid(quote_id, expires, sig, now_utc()):
+        raise HTTPException(status_code=403, detail="This link isn't valid")
+    quote = get_quote(quote_id)
+    if quote is None:
+        raise HTTPException(status_code=404, detail="Quote not found")
+    pdf = make_quote_pdf(quote, get_client(quote.client_id).business_name)
+    return Response(content=pdf, media_type="application/pdf")
 
 
 @app.post("/whatsapp-status")
