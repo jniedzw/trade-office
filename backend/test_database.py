@@ -199,3 +199,4 @@ def test_a_new_column_is_added_to_an_old_table(monkeypatch, tmp_path):
     database.create_tables()  # Running it twice must be safe.
 
     assert database.get_business_details(1).brand_colour == "#b8975a"
+    assert database.get_business_details(1).contact == ""

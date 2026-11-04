@@ -83,6 +83,7 @@ def test_make_invoice_pdf():
         address="1 Test Street\nLiverpool",
         ref_letters="TP",
         bank_details="Test Bank\nSort code 00-00-00",
+        contact="07700 900000",
     )
 
     pdf = make_invoice_pdf(invoice, quote, "Test & Co", ["Fit basin"], details)

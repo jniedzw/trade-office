@@ -44,9 +44,10 @@ def main():
         ref_letters = input("Please use 2 to 4 letters, like DPL: ").strip().upper()
     payment_days = int(input("Days to pay an invoice (Enter for 14): ").strip() or 14)
     bank_details = ask_lines("Bank details for invoices")
+    contact = input("Phone or email for customers: ").strip()
     brand_colour = input("Accent colour, like #b8975a (Enter for gold): ").strip() or "#b8975a"
     while not is_colour(brand_colour):
-        brand_colour = input("Please use # and 6 letters or digits, like #b8975a: ").strip()
+        brand_colour = input("Please use # and 6 letters or digits (Enter for gold): ").strip() or "#b8975a"
 
     save_business_details(
         client.id,
@@ -56,6 +57,7 @@ def main():
         payment_days=payment_days,
         bank_details=bank_details,
         brand_colour=brand_colour,
+        contact=contact,
     )
     print(f"Saved details for {client.business_name}.")
 

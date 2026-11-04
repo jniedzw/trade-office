@@ -74,6 +74,12 @@ def draw_page(canvas, doc, page):
     canvas.restoreState()
 
 
+def from_text(details):
+    """Return who a document is from: name, address and, if there is one, contact."""
+    text = f"{details.legal_name}\n{details.address}"
+    return f"{text}\n{details.contact}" if details.contact else text
+
+
 def section(heading, items, accent, style=BODY):
     """Return a heading in the accent colour with a paragraph for each item."""
     heading_style = ParagraphStyle("section", parent=BODY, fontName="Helvetica-Bold", textColor=accent)
@@ -127,7 +133,7 @@ def make_quote_pdf(quote, business_name, lines=(), details=None):
         content += section("SCOPE OF WORKS", lines, accent)
     content += [total_box("TOTAL QUOTATION", quote.total_pence, "", accent), Spacer(1, 7 * mm)]
     if details:
-        content += section("FROM", [f"{details.legal_name}\n{details.address}"], accent, SMALL)
+        content += section("FROM", [from_text(details)], accent, SMALL)
         days = details.payment_days
         content += section("PAYMENT", [f"Payment due within {days} days of the invoice."], accent, SMALL)
 
@@ -177,8 +183,11 @@ def make_invoice_pdf(invoice, quote, business_name, lines, details):
 
     content = [Paragraph(escape(quote.title.upper()), TITLE), Spacer(1, 4 * mm)]
     content += section("INVOICE TO", [f"{quote.customer_name}\n{invoice.customer_address}"], accent)
-    content += section("FROM", [f"{details.legal_name}\n{details.address}"], accent)
+    content += section("FROM", [from_text(details)], accent)
+    # Invoices must show when the work was done. For now we assume it was finished
+    # the day it's invoiced, which is when tradespeople usually send them.
     content += section("WORK CARRIED OUT", lines or [quote.title], accent)
+    content += [Paragraph(f"Date of work: {uk_date(invoice.time)}", SMALL), Spacer(1, 4 * mm)]
     content += [total_box("AMOUNT DUE", quote.total_pence, "", accent), Spacer(1, 7 * mm)]
     payment = [
         f"Please pay by {due}.",

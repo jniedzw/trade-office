@@ -121,6 +121,8 @@ class BusinessDetails(SQLModel, table=True):
     bank_details: str
     # The accent colour on their PDFs, as a web colour like #b8975a.
     brand_colour: str = "#b8975a"
+    # A phone number or email for customers, shown on quotes and invoices.
+    contact: str = ""
 
 
 class Invoice(SQLModel, table=True):
@@ -142,6 +144,7 @@ class Invoice(SQLModel, table=True):
 # tables, never missing columns, so these are added by hand: a small migration.
 NEW_COLUMNS = [
     ("businessdetails", "brand_colour", "VARCHAR NOT NULL DEFAULT '#b8975a'"),
+    ("businessdetails", "contact", "VARCHAR NOT NULL DEFAULT ''"),
 ]
 
 
