@@ -755,7 +755,8 @@ def test_owner_can_save_a_quote_by_whatsapp(monkeypatch, tmp_path):
     )
 
     assert reply == (
-        "Draft quote 1 saved: Bathroom refit for Mrs Jones, £1,250.50, 0 lines of work.",
+        "Draft quote 1 saved: Bathroom refit for Mrs Jones, £1,250.50, 0 lines of work. "
+        "Check it, then send FINAL 1 for the version to send.",
         None,
     )
     assert database.get_quote(1).total_pence == 125050
@@ -867,7 +868,7 @@ def test_a_quote_with_lines_by_whatsapp(monkeypatch, tmp_path):
         "QUOTE Mrs Jones | Bathroom refit | BR | 1250\n- Remove old suite\n- Fit basin",
     )
 
-    assert text.endswith("£1,250.00, 2 lines of work.")
+    assert "£1,250.00, 2 lines of work." in text
     assert database.get_quote_lines(1) == ["Remove old suite", "Fit basin"]
 
 
@@ -896,3 +897,52 @@ def test_a_rough_quote_is_read_by_the_ai(monkeypatch, tmp_path):
 
     assert text.startswith("Draft quote 1 saved: Bathroom refit for Mrs Jones")
     assert database.get_quote_lines(1) == ["Remove old suite"]
+
+
+def test_final_makes_a_quote_final(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+
+    text, link = main.whatsapp_reply(f"whatsapp:{OWNER}", "final 1")
+
+    assert text == "Quote 1 is final. Forward this PDF to Mrs Jones."
+    assert link.startswith(f"{settings.PUBLIC_URL}/quotes/1.pdf")
+    assert database.get_quote(1).status == "final"
+
+
+def test_final_needs_a_number(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+
+    text, link = main.whatsapp_reply(f"whatsapp:{OWNER}", "FINAL one")
+
+    assert text.startswith("To finish a quote")
+    assert link is None
+    assert database.get_quote(1).status == "draft"
+
+
+def test_final_for_a_quote_that_doesnt_exist(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+
+    text, link = main.whatsapp_reply(f"whatsapp:{OWNER}", "FINAL 9")
+
+    assert text == "There's no quote 9 for Test Plumbing."
+    assert link is None
+
+
+def test_a_client_cant_finish_another_clients_quote(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+    other_owner = "+447700900790"
+    with Session(database.engine) as session:
+        session.add(
+            Client(
+                business_name="Other Plumbing",
+                owner_mobile=other_owner,
+                twilio_number="+447700900457",
+                text_back_message="Hi",
+            )
+        )
+        session.commit()
+
+    text, link = main.whatsapp_reply(f"whatsapp:{other_owner}", "FINAL 1")
+
+    assert text == "There's no quote 1 for Other Plumbing."
+    assert database.get_quote(1).status == "draft"

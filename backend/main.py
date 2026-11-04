@@ -11,6 +11,7 @@ from ai import read_quote
 from database import (
     create_tables,
     delete_old_calls,
+    finish_quote,
     get_business_details,
     get_client,
     get_client_by_number,
@@ -211,12 +212,30 @@ def quote_reply(client, details):
     lines = "1 line" if count == 1 else f"{count} lines"
     text = (
         f"Draft quote {quote_id} saved: {quote['title']} for "
-        f"{quote['customer_name']}, {money(quote['total_pence'])}, {lines} of work."
+        f"{quote['customer_name']}, {money(quote['total_pence'])}, {lines} of work. "
+        f"Check it, then send FINAL {quote_id} for the version to send."
     )
+    return with_pdf(text, quote_id)
+
+
+def with_pdf(text, quote_id):
+    """Return our reply with a link to the quote's PDF, if links can work."""
     # Without the secret no link would work, so send the words on their own.
     if not settings.QUOTE_LINK_SECRET:
         return text, None
     return text, quote_link(quote_id, now_utc())
+
+
+def final_reply(client, number):
+    """Make a quote final and return our reply and a link to the clean PDF."""
+    if not number.isdigit():
+        return "To finish a quote, send FINAL and its number, like FINAL 3.", None
+    quote = finish_quote(client.id, int(number))
+    if quote is None:
+        return f"There's no quote {number} for {client.business_name}.", None
+    return with_pdf(
+        f"Quote {quote.id} is final. Forward this PDF to {quote.customer_name}.", quote.id
+    )
 
 
 def whatsapp_reply(sender, body=""):
@@ -236,6 +255,8 @@ def whatsapp_reply(sender, body=""):
     # The first word, so "QUOTE" can be followed by a space or a new line.
     if command.split()[:1] == ["QUOTE"]:
         return quote_reply(client, body.strip()[len("QUOTE"):])
+    if command.split()[:1] == ["FINAL"]:
+        return final_reply(client, command.removeprefix("FINAL").strip())
     return f"Hi, it's Jack. {client.business_name} is connected to WhatsApp.", None
 
 

@@ -258,6 +258,20 @@ def save_business_details(client_id, **details):
         session.commit()
 
 
+def finish_quote(client_id, quote_id):
+    """Mark this client's quote as final and return it, or None if it isn't theirs."""
+    with Session(engine) as session:
+        quote = session.get(Quote, quote_id)
+        # Checking the owner stops one tradesperson finishing another's quote.
+        if quote is None or quote.client_id != client_id:
+            return None
+        quote.status = "final"
+        session.add(quote)
+        session.commit()
+        session.refresh(quote)
+        return quote
+
+
 def get_quote(quote_id):
     """Return the quote with this ID, or None."""
     with Session(engine) as session:

@@ -45,7 +45,7 @@ sequenceDiagram
 | GET | `/` | Health check |
 | POST | `/voice` | Twilio webhook for incoming calls |
 | POST | `/sms` | Twilio webhook for incoming texts: forwards customers' replies to the tradesperson |
-| POST | `/whatsapp` | Twilio webhook for incoming WhatsApp messages: recognises tradespeople by their mobile number, and handles `ALERTS ON`, `ALERTS OFF`, and `QUOTE` to save a draft quote and reply with its PDF |
+| POST | `/whatsapp` | Twilio webhook for incoming WhatsApp messages: recognises tradespeople by their mobile number, and handles `ALERTS ON`, `ALERTS OFF`, `QUOTE` to save a draft quote and reply with its PDF, and `FINAL` to finish one |
 | GET | `/quotes/{id}.pdf` | Downloads a quote's PDF; only works with a signed link that expires after 7 days |
 | POST | `/whatsapp-status` | Twilio delivery updates: sends a WhatsApp alert by SMS instead if it fails |
 
