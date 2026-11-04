@@ -1,17 +1,9 @@
-"""Quotes: reading them from WhatsApp, and turning them into PDFs."""
+"""Quotes: reading them from WhatsApp, money and dates, and signed PDF links."""
 
 import hashlib
 import hmac
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
-from io import BytesIO
-from xml.sax.saxutils import escape
-
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle
-from reportlab.lib.units import mm
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 import settings
 
@@ -26,11 +18,6 @@ BULLETS = ("-", "•")
 
 # How long a quote PDF link works for.
 LINK_DAYS = 7
-
-BODY = ParagraphStyle("body", fontName="Helvetica", fontSize=11, leading=16)
-GREY = ParagraphStyle("grey", parent=BODY, textColor=colors.HexColor("#666666"))
-BOLD = ParagraphStyle("bold", parent=BODY, fontName="Helvetica-Bold")
-BIG = ParagraphStyle("big", parent=BODY, fontName="Helvetica-Bold", fontSize=18, leading=24)
 
 
 def money(pence):
@@ -104,47 +91,6 @@ def reference(prefix, job_code, day):
     prefix is the business's letters, job_code the job's (BR for bathroom).
     """
     return f"{prefix}-{job_code}-{day.strftime('%d%m%y')}"
-
-
-def lines_of(text):
-    """Return text with its new lines kept, safe for reportlab."""
-    return escape(text).replace("\n", "<br/>")
-
-
-def make_quote_pdf(quote, business_name, lines=(), details=None):
-    """Return the quote as a PDF, as bytes ready to send.
-
-    details is the client's BusinessDetails, or None if they haven't been added.
-    """
-    # Built in memory, not saved: the server's disk is no place for customer files.
-    buffer = BytesIO()
-    heading = "DRAFT QUOTATION" if quote.status == "draft" else "QUOTATION"
-    letters = details.ref_letters if details else "Q"
-    # The quote's ID on the end keeps two jobs on the same day apart.
-    ref = f"{reference(letters, quote.job_code, quote.time)}-{quote.id}"
-
-    # escape() stops a name like "Smith & Sons" breaking reportlab's markup.
-    content = [Paragraph(escape(business_name), BIG)]
-    if details:
-        content.append(Paragraph(lines_of(f"{details.legal_name}\n{details.address}"), GREY))
-    content += [
-        Paragraph(f"{heading}, {uk_date(quote.time)}, Ref: {ref}", GREY),
-        Spacer(1, 10 * mm),
-        Paragraph(f"For: {escape(quote.customer_name)}", BODY),
-        Paragraph(f"Work: {escape(quote.title)}", BODY),
-        Spacer(1, 6 * mm),
-    ]
-    if lines:
-        content.append(Paragraph("Scope of works", BOLD))
-        content += [Paragraph(f"• {escape(line)}", BODY) for line in lines]
-        content.append(Spacer(1, 6 * mm))
-    content.append(Paragraph(f"Total: {money(quote.total_pence)}", BIG))
-    if details:
-        days = details.payment_days
-        content.append(Paragraph(f"Payment due within {days} days of the invoice.", GREY))
-    document = SimpleDocTemplate(buffer, pagesize=A4, title=f"Quote {ref}")
-    document.build(content)
-    return buffer.getvalue()
 
 
 def link_signature(quote_id, expires):

@@ -32,10 +32,10 @@ from database import (
     set_whatsapp_alerts,
     whatsapp_alerts_on,
 )
+from pdfs import make_quote_pdf
 from quotes import (
     QUOTE_HELP,
     link_is_valid,
-    make_quote_pdf,
     money,
     parse_quote,
     quote_link,

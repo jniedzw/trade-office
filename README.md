@@ -56,7 +56,8 @@ backend/
   main.py          # FastAPI app and endpoints
   database.py      # SQLModel tables (clients, calls, quotes) and lookups
   sms.py           # send_sms() using the Twilio client
-  quotes.py        # read typed quotes, make quote PDFs, sign download links
+  quotes.py        # read typed quotes, money and dates, signed download links
+  pdfs.py          # make quote PDFs in the client's colours
   ai.py            # read rough quote messages with Claude
   eval_quotes.py   # check the AI against 20 made-up messages (costs a few pence)
   settings.py      # app-wide settings read from .env

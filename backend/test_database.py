@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from sqlalchemy import text
 from sqlmodel import Session, create_engine, select
 
 import database
@@ -178,3 +179,23 @@ def test_business_details_can_be_added_then_changed(monkeypatch, tmp_path):
     saved = database.get_business_details(1)
     assert saved.ref_letters == "TP"
     assert saved.payment_days == 30
+
+
+def test_a_new_column_is_added_to_an_old_table(monkeypatch, tmp_path):
+    engine = use_temp_database(monkeypatch, tmp_path)
+    # Make the table the way it was before brand_colour existed.
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE businessdetails"))
+        connection.execute(text(
+            "CREATE TABLE businessdetails (id INTEGER PRIMARY KEY, client_id INTEGER, "
+            "legal_name VARCHAR, address VARCHAR, ref_letters VARCHAR, "
+            "payment_days INTEGER, bank_details VARCHAR)"
+        ))
+        connection.execute(text(
+            "INSERT INTO businessdetails VALUES (1, 1, 'Test', 'Street', 'TP', 14, 'Bank')"
+        ))
+
+    database.create_tables()
+    database.create_tables()  # Running it twice must be safe.
+
+    assert database.get_business_details(1).brand_colour == "#b8975a"

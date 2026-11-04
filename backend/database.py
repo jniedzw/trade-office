@@ -1,6 +1,7 @@
 import os
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import inspect, text
 from sqlmodel import Field, Session, SQLModel, UniqueConstraint, create_engine, select
 
 # A local SQLite file unless .env says otherwise (on Render it's on the persistent disk).
@@ -118,11 +119,31 @@ class BusinessDetails(SQLModel, table=True):
     ref_letters: str
     payment_days: int = 14
     bank_details: str
+    # The accent colour on their PDFs, as a web colour like #b8975a.
+    brand_colour: str = "#b8975a"
+
+
+# Columns added after their table was first made. create_all only makes missing
+# tables, never missing columns, so these are added by hand: a small migration.
+NEW_COLUMNS = [
+    ("businessdetails", "brand_colour", "VARCHAR NOT NULL DEFAULT '#b8975a'"),
+]
+
+
+def add_missing_columns():
+    """Add any column in NEW_COLUMNS that an existing table doesn't have yet."""
+    inspector = inspect(engine)
+    with engine.begin() as connection:
+        for table, column, definition in NEW_COLUMNS:
+            existing = [col["name"] for col in inspector.get_columns(table)]
+            if column not in existing:
+                connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {definition}"))
 
 
 def create_tables():
-    """Create any tables that don't exist yet."""
+    """Create any tables that don't exist yet, then add any new columns."""
     SQLModel.metadata.create_all(engine)
+    add_missing_columns()
 
 
 def get_client_by_number(twilio_number):

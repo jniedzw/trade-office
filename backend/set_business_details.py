@@ -13,6 +13,12 @@ def is_ref_letters(text):
     return 2 <= len(text) <= 4 and text.isalpha() and text.isascii() and text.isupper()
 
 
+def is_colour(text):
+    """Return True if text is a web colour like #b8975a."""
+    digits = text.removeprefix("#")
+    return text.startswith("#") and len(digits) == 6 and all(c in "0123456789abcdefABCDEF" for c in digits)
+
+
 def ask_lines(prompt):
     """Ask for several lines, ending with an empty one, and join them."""
     print(f"{prompt} (one line at a time, then press Enter on an empty line):")
@@ -38,6 +44,9 @@ def main():
         ref_letters = input("Please use 2 to 4 letters, like DPL: ").strip().upper()
     payment_days = int(input("Days to pay an invoice (Enter for 14): ").strip() or 14)
     bank_details = ask_lines("Bank details for invoices")
+    brand_colour = input("Accent colour, like #b8975a (Enter for gold): ").strip() or "#b8975a"
+    while not is_colour(brand_colour):
+        brand_colour = input("Please use # and 6 letters or digits, like #b8975a: ").strip()
 
     save_business_details(
         client.id,
@@ -46,6 +55,7 @@ def main():
         ref_letters=ref_letters,
         payment_days=payment_days,
         bank_details=bank_details,
+        brand_colour=brand_colour,
     )
     print(f"Saved details for {client.business_name}.")
 
