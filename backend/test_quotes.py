@@ -1,6 +1,7 @@
-from datetime import date
+from datetime import date, datetime, timezone
 
-from quotes import money, parse_quote, reference, to_pence, uk_date
+from database import Quote
+from quotes import make_quote_pdf, money, parse_quote, reference, to_pence, uk_date
 
 
 def test_money_adds_pound_sign_and_pence():
@@ -54,3 +55,20 @@ def test_to_pence():
 def test_to_pence_rejects_bad_prices():
     for price in ["abc", "0", "-50", "10.999", "nan", "inf", ""]:
         assert to_pence(price) is None, price
+
+
+def test_make_quote_pdf_returns_a_pdf():
+    quote = Quote(
+        id=1,
+        client_id=1,
+        customer_name="Smith & Sons",
+        title="Boiler service",
+        job_code="BS",
+        total_pence=8500,
+        time=datetime(2026, 11, 4, tzinfo=timezone.utc),
+    )
+
+    pdf = make_quote_pdf(quote, "Test Plumbing")
+
+    # Every PDF file starts with these bytes.
+    assert pdf.startswith(b"%PDF-")

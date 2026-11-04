@@ -1,8 +1,20 @@
-"""Small helpers for quotes and invoices: money, dates and references."""
+"""Quotes: reading them from WhatsApp, and turning them into PDFs."""
 
 from decimal import Decimal, InvalidOperation
+from io import BytesIO
+from xml.sax.saxutils import escape
+
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 QUOTE_HELP = "To make a quote, send: QUOTE Mrs Jones | Bathroom refit | BR | 1250.50"
+
+BODY = ParagraphStyle("body", fontName="Helvetica", fontSize=11, leading=16)
+GREY = ParagraphStyle("grey", parent=BODY, textColor=colors.HexColor("#666666"))
+BIG = ParagraphStyle("big", parent=BODY, fontName="Helvetica-Bold", fontSize=18, leading=24)
 
 
 def money(pence):
@@ -57,3 +69,26 @@ def reference(prefix, job_code, day):
     prefix is the business's letters, job_code the job's (BR for bathroom).
     """
     return f"{prefix}-{job_code}-{day.strftime('%d%m%y')}"
+
+
+def make_quote_pdf(quote, business_name):
+    """Return the quote as a PDF, as bytes ready to send."""
+    # Built in memory, not saved: the server's disk is no place for customer files.
+    buffer = BytesIO()
+    heading = "DRAFT QUOTATION" if quote.status == "draft" else "QUOTATION"
+    # The quote's ID makes the reference unique until clients have their own letters.
+    ref = reference(f"Q{quote.id}", quote.job_code, quote.time)
+
+    # escape() stops a name like "Smith & Sons" breaking reportlab's markup.
+    content = [
+        Paragraph(escape(business_name), BIG),
+        Paragraph(f"{heading}, {uk_date(quote.time)}, Ref: {ref}", GREY),
+        Spacer(1, 10 * mm),
+        Paragraph(f"For: {escape(quote.customer_name)}", BODY),
+        Paragraph(f"Work: {escape(quote.title)}", BODY),
+        Spacer(1, 6 * mm),
+        Paragraph(f"Total: {money(quote.total_pence)}", BIG),
+    ]
+    document = SimpleDocTemplate(buffer, pagesize=A4, title=f"Quote {ref}")
+    document.build(content)
+    return buffer.getvalue()
