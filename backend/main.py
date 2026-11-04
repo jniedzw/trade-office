@@ -383,13 +383,15 @@ async def incoming_sms(
 
 @app.post("/whatsapp")
 async def incoming_whatsapp(
-    request: Request, From: str = Form(), Body: str = Form("")
+    request: Request, From: str = Form(), Body: str = Form(""), ButtonPayload: str = Form("")
 ):
     # Twilio calls this when someone messages our WhatsApp number.
     await check_twilio_signature(request)
 
+    # A tapped button sends its title as Body, and the ID we gave it as ButtonPayload.
+    # We make each ID a command, like "FINAL 6", so buttons and typing work the same.
     # Replying in the response sends it straight back through WhatsApp.
-    text, link = whatsapp_reply(From, Body)
+    text, link = whatsapp_reply(From, ButtonPayload or Body)
     twiml = MessagingResponse()
     message = twiml.message(text)
     if link:

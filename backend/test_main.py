@@ -525,9 +525,11 @@ def test_owner_alert_for_a_repeat_caller():
     )
 
 
-def signed_whatsapp(sender, body="Hi"):
+def signed_whatsapp(sender, body="Hi", button=None):
     """Send /whatsapp a fake message, signed the same way Twilio signs real ones."""
     form = {"From": f"whatsapp:{sender}", "To": f"whatsapp:{OUR_NUMBER}", "Body": body}
+    if button:
+        form["ButtonPayload"] = button
     validator = RequestValidator(settings.TWILIO_AUTH_TOKEN)
     signature = validator.compute_signature(settings.PUBLIC_URL + "/whatsapp", form)
     return client.post(
@@ -1051,3 +1053,13 @@ def test_a_quote_link_cant_open_an_invoice(monkeypatch, tmp_path):
     response = client.get(path_of(quote_link).replace("/quotes/", "/invoices/"))
 
     assert response.status_code == 403
+
+
+def test_a_tapped_button_runs_its_command(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+
+    # The button's title is "Make final", but its hidden ID is the command.
+    response = signed_whatsapp(OWNER, body="Make final", button="FINAL 1")
+
+    assert "Quote 1 is final" in response.text
+    assert database.get_quote(1).status == "final"
