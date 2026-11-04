@@ -24,9 +24,11 @@ from database import (
     pop_pending_alert,
     retention_cutoff,
     save_pending_alert,
+    save_quote,
     set_whatsapp_alerts,
     whatsapp_alerts_on,
 )
+from quotes import QUOTE_HELP, money, parse_quote
 from sms import count_old_twilio_records, send_sms, send_whatsapp_alert
 
 # The usual opt-out and opt-in words for text messages.
@@ -187,6 +189,18 @@ def greeting(business_name, texted):
     return f"Sorry, {business_name} can't take your call right now. Please try again later."
 
 
+def quote_reply(client, details):
+    """Save a draft quote from the owner's message and return our reply."""
+    quote = parse_quote(details)
+    if quote is None:
+        return QUOTE_HELP
+    quote_id = save_quote(client.id, **quote)
+    return (
+        f"Draft quote {quote_id} saved: {quote['title']} for "
+        f"{quote['customer_name']}, {money(quote['total_pence'])}."
+    )
+
+
 def whatsapp_reply(sender, body=""):
     """Handle a WhatsApp message and return our reply."""
     # Twilio writes WhatsApp numbers as "whatsapp:+447...", so take that off first.
@@ -201,6 +215,8 @@ def whatsapp_reply(sender, body=""):
     if command == "ALERTS OFF":
         set_whatsapp_alerts(client.id, False)
         return "Done. Missed-call alerts will come by text."
+    if command == "QUOTE" or command.startswith("QUOTE "):
+        return quote_reply(client, body.strip()[len("QUOTE"):])
     return f"Hi, it's Jack. {client.business_name} is connected to WhatsApp."
 
 

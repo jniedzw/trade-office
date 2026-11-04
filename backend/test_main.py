@@ -738,3 +738,34 @@ def test_whatsapp_alert_details():
     assert "ring back" in main.whatsapp_alert_details(
         "+441514960000", False, False, False
     )[1]
+
+
+def test_owner_can_save_a_quote_by_whatsapp(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    reply = main.whatsapp_reply(
+        f"whatsapp:{OWNER}", "quote Mrs Jones | Bathroom refit | BR | 1250.50"
+    )
+
+    assert reply == "Draft quote 1 saved: Bathroom refit for Mrs Jones, £1,250.50."
+    assert database.get_quote(1).total_pence == 125050
+
+
+def test_a_badly_written_quote_gets_help(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    reply = main.whatsapp_reply(f"whatsapp:{OWNER}", "QUOTE bathroom about 1250")
+
+    assert reply == main.QUOTE_HELP
+    assert database.get_quote(1) is None
+
+
+def test_a_stranger_cant_make_a_quote(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    reply = main.whatsapp_reply(
+        f"whatsapp:{MOBILE_CALLER}", "QUOTE Mrs Jones | Bathroom | BR | 100"
+    )
+
+    assert reply == main.WHATSAPP_NOT_A_CLIENT
+    assert database.get_quote(1) is None
