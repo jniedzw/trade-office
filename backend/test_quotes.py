@@ -4,11 +4,15 @@ from quotes import money, reference, uk_date
 
 
 def test_money_adds_pound_sign_and_pence():
-    assert money(85) == "£85.00"
+    assert money(8500) == "£85.00"
 
 
 def test_money_adds_commas():
-    assert money(1250.5) == "£1,250.50"
+    assert money(125050) == "£1,250.50"
+
+
+def test_money_pads_small_pence():
+    assert money(105) == "£1.05"
 
 
 def test_uk_date_has_no_leading_zero():

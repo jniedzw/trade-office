@@ -122,3 +122,21 @@ def test_recent_calls_are_per_client(monkeypatch, tmp_path):
 
     assert len(database.get_recent_calls(1, "+447700900102")) == 1
     assert database.get_recent_calls(2, "+447700900102") == []
+
+
+def test_save_quote_starts_as_a_draft(monkeypatch, tmp_path):
+    engine = use_temp_database(monkeypatch, tmp_path)
+    add_client(engine, TWILIO_NUMBER)
+
+    quote_id = database.save_quote(1, "Mrs Jones", "Bathroom refit", "BR", 125050)
+    quote = database.get_quote(quote_id)
+
+    assert quote.customer_name == "Mrs Jones"
+    assert quote.total_pence == 125050
+    assert quote.status == "draft"
+
+
+def test_get_quote_returns_none_for_unknown_id(monkeypatch, tmp_path):
+    use_temp_database(monkeypatch, tmp_path)
+
+    assert database.get_quote(99) is None

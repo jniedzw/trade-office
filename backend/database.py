@@ -81,6 +81,21 @@ class PendingAlert(SQLModel, table=True):
     time: datetime = Field(default_factory=now_utc)
 
 
+class Quote(SQLModel, table=True):
+    """One quote a client has made for a customer."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    client_id: int = Field(foreign_key="client.id", index=True)
+    customer_name: str
+    title: str
+    job_code: str
+    # Whole pence, because floats can't hold amounts like 0.1 exactly.
+    total_pence: int
+    # draft, then sent, then approved.
+    status: str = "draft"
+    time: datetime = Field(default_factory=now_utc)
+
+
 def create_tables():
     """Create any tables that don't exist yet."""
     SQLModel.metadata.create_all(engine)
@@ -158,6 +173,29 @@ def get_client(client_id):
     """Return the client with this ID, or None."""
     with Session(engine) as session:
         return session.get(Client, client_id)
+
+
+def save_quote(client_id, customer_name, title, job_code, total_pence):
+    """Save a new draft quote and return its ID."""
+    quote = Quote(
+        client_id=client_id,
+        customer_name=customer_name,
+        title=title,
+        job_code=job_code,
+        total_pence=total_pence,
+    )
+    with Session(engine) as session:
+        session.add(quote)
+        session.commit()
+        # The database chooses the ID, so reload the quote to read it.
+        session.refresh(quote)
+        return quote.id
+
+
+def get_quote(quote_id):
+    """Return the quote with this ID, or None."""
+    with Session(engine) as session:
+        return session.get(Quote, quote_id)
 
 
 def get_recent_calls(client_id, caller):

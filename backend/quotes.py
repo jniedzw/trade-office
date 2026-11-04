@@ -3,9 +3,11 @@
 from datetime import date
 
 
-def money(amount):
-    """Return an amount of pounds, like £1,250.00."""
-    return f"£{amount:,.2f}"
+def money(pence):
+    """Return whole pence as pounds, like 125050 -> £1,250.50."""
+    # divmod gives the pounds and the pence left over, with no float rounding.
+    pounds, pence = divmod(pence, 100)
+    return f"£{pounds:,}.{pence:02}"
 
 
 def uk_date(day):
