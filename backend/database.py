@@ -123,6 +123,21 @@ class BusinessDetails(SQLModel, table=True):
     brand_colour: str = "#b8975a"
 
 
+class Invoice(SQLModel, table=True):
+    """An invoice made from a client's final quote."""
+
+    # Each client numbers their invoices 1, 2, 3..., and a quote gets one invoice.
+    __table_args__ = (UniqueConstraint("client_id", "number"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    client_id: int = Field(foreign_key="client.id", index=True)
+    quote_id: int = Field(foreign_key="quote.id", unique=True)
+    number: int
+    # Invoices must show the customer's address; quotes don't need it.
+    customer_address: str
+    time: datetime = Field(default_factory=now_utc)
+
+
 # Columns added after their table was first made. create_all only makes missing
 # tables, never missing columns, so these are added by hand: a small migration.
 NEW_COLUMNS = [
@@ -270,6 +285,31 @@ def finish_quote(client_id, quote_id):
         session.commit()
         session.refresh(quote)
         return quote
+
+
+def get_invoice_for_quote(quote_id):
+    """Return the invoice already made from this quote, or None."""
+    with Session(engine) as session:
+        statement = select(Invoice).where(Invoice.quote_id == quote_id)
+        return session.exec(statement).first()
+
+
+def save_invoice(client_id, quote_id, customer_address):
+    """Save an invoice with the client's next invoice number, and return it."""
+    with Session(engine) as session:
+        numbers = session.exec(select(Invoice.number).where(Invoice.client_id == client_id))
+        # Invoice numbers must run in order with no gaps, so take the next one up.
+        number = max(numbers, default=0) + 1
+        invoice = Invoice(
+            client_id=client_id,
+            quote_id=quote_id,
+            number=number,
+            customer_address=customer_address,
+        )
+        session.add(invoice)
+        session.commit()
+        session.refresh(invoice)
+        return invoice
 
 
 def get_quote(quote_id):

@@ -13,6 +13,7 @@ from database import (
     delete_old_calls,
     finish_quote,
     get_business_details,
+    get_invoice_for_quote,
     get_client,
     get_client_by_number,
     get_client_by_owner,
@@ -28,6 +29,7 @@ from database import (
     overdue_alert_sids,
     pop_pending_alert,
     retention_cutoff,
+    save_invoice,
     save_pending_alert,
     save_quote,
     set_whatsapp_alerts,
@@ -238,6 +240,35 @@ def final_reply(client, number):
     )
 
 
+INVOICE_HELP = "To make an invoice, send INVOICE, the quote number, then the customer's address:\nINVOICE 3\n12 Elm Road\nLiverpool L1 0AA"
+
+
+def invoice_reply(client, details):
+    """Make an invoice from a final quote and return our reply."""
+    first_line, *address_lines = details.strip().splitlines() or [""]
+    number = first_line.strip()
+    address = "\n".join(line.strip() for line in address_lines if line.strip())
+    if not number.isdigit() or address == "":
+        return INVOICE_HELP, None
+
+    quote = get_quote(int(number))
+    if quote is None or quote.client_id != client.id:
+        return f"There's no quote {number} for {client.business_name}.", None
+    if quote.status != "final":
+        return f"Quote {number} is still a draft. Send FINAL {number} first.", None
+    # Bank details come from here, and an invoice without them can't be paid.
+    if get_business_details(client.id) is None:
+        alert_james(client, "tried to invoice without business details.")
+        return "Your invoice details aren't set up yet. We've been told and will sort it.", None
+
+    # Sending INVOICE twice for one quote gives the same invoice, not a second one.
+    invoice = get_invoice_for_quote(quote.id) or save_invoice(client.id, quote.id, address)
+    return (
+        f"Invoice {invoice.number} saved for {quote.customer_name}, "
+        f"{money(quote.total_pence)}."
+    ), None
+
+
 def whatsapp_reply(sender, body=""):
     """Handle a WhatsApp message and return our reply and a file link (or None)."""
     # Twilio writes WhatsApp numbers as "whatsapp:+447...", so take that off first.
@@ -255,6 +286,8 @@ def whatsapp_reply(sender, body=""):
     # The first word, so "QUOTE" can be followed by a space or a new line.
     if command.split()[:1] == ["QUOTE"]:
         return quote_reply(client, body.strip()[len("QUOTE"):])
+    if command.split()[:1] == ["INVOICE"]:
+        return invoice_reply(client, body.strip()[len("INVOICE"):])
     if command.split()[:1] == ["FINAL"]:
         return final_reply(client, command.removeprefix("FINAL").strip())
     return f"Hi, it's Jack. {client.business_name} is connected to WhatsApp.", None

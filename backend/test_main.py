@@ -946,3 +946,96 @@ def test_a_client_cant_finish_another_clients_quote(monkeypatch, tmp_path):
 
     assert text == "There's no quote 1 for Other Plumbing."
     assert database.get_quote(1).status == "draft"
+
+
+ADDRESS = "\n12 Test Road\nLiverpool L1 0AA"
+
+
+def use_final_quote(monkeypatch, tmp_path, with_details=True):
+    """Save quote 1 as final, and the test client's business details."""
+    use_quote_links(monkeypatch, tmp_path)
+    database.finish_quote(1, 1)
+    if with_details:
+        database.save_business_details(
+            1, legal_name="Test", address="1 Test Street", ref_letters="TP", bank_details="Test Bank"
+        )
+
+
+def test_invoice_saves_an_invoice(monkeypatch, tmp_path):
+    use_final_quote(monkeypatch, tmp_path)
+
+    text, link = main.whatsapp_reply(f"whatsapp:{OWNER}", "invoice 1" + ADDRESS)
+
+    assert text == "Invoice 1 saved for Mrs Jones, £1,250.50."
+    invoice = database.get_invoice_for_quote(1)
+    assert invoice.customer_address == "12 Test Road\nLiverpool L1 0AA"
+
+
+def test_invoicing_a_quote_twice_gives_the_same_invoice(monkeypatch, tmp_path):
+    use_final_quote(monkeypatch, tmp_path)
+
+    main.whatsapp_reply(f"whatsapp:{OWNER}", "INVOICE 1" + ADDRESS)
+    text, link = main.whatsapp_reply(f"whatsapp:{OWNER}", "INVOICE 1" + ADDRESS)
+
+    assert text.startswith("Invoice 1 saved")
+
+
+def test_invoice_numbers_go_up_by_one(monkeypatch, tmp_path):
+    use_final_quote(monkeypatch, tmp_path)
+    database.save_quote(1, "Mr Smith", "Boiler service", "BS", 8500)
+    database.finish_quote(1, 2)
+
+    main.whatsapp_reply(f"whatsapp:{OWNER}", "INVOICE 1" + ADDRESS)
+    text, link = main.whatsapp_reply(f"whatsapp:{OWNER}", "INVOICE 2" + ADDRESS)
+
+    assert text == "Invoice 2 saved for Mr Smith, £85.00."
+
+
+def test_invoice_needs_an_address(monkeypatch, tmp_path):
+    use_final_quote(monkeypatch, tmp_path)
+
+    text, link = main.whatsapp_reply(f"whatsapp:{OWNER}", "INVOICE 1")
+
+    assert text == main.INVOICE_HELP
+    assert database.get_invoice_for_quote(1) is None
+
+
+def test_a_draft_cant_be_invoiced(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+
+    text, link = main.whatsapp_reply(f"whatsapp:{OWNER}", "INVOICE 1" + ADDRESS)
+
+    assert text == "Quote 1 is still a draft. Send FINAL 1 first."
+
+
+def test_invoice_without_business_details_alerts_james(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path)
+    monkeypatch.setattr(settings, "QUOTE_LINK_SECRET", "test-secret")
+    database.save_quote(1, "Mrs Jones", "Bathroom refit", "BR", 125050)
+    database.finish_quote(1, 1)
+
+    text, link = main.whatsapp_reply(f"whatsapp:{OWNER}", "INVOICE 1" + ADDRESS)
+
+    assert text.startswith("Your invoice details aren't set up yet")
+    assert texted_numbers == [JAMES]
+    assert database.get_invoice_for_quote(1) is None
+
+
+def test_a_client_cant_invoice_another_clients_quote(monkeypatch, tmp_path):
+    use_final_quote(monkeypatch, tmp_path)
+    other_owner = "+447700900790"
+    with Session(database.engine) as session:
+        session.add(
+            Client(
+                business_name="Other Plumbing",
+                owner_mobile=other_owner,
+                twilio_number="+447700900457",
+                text_back_message="Hi",
+            )
+        )
+        session.commit()
+
+    text, link = main.whatsapp_reply(f"whatsapp:{other_owner}", "INVOICE 1" + ADDRESS)
+
+    assert text == "There's no quote 1 for Other Plumbing."
+    assert database.get_invoice_for_quote(1) is None
