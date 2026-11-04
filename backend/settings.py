@@ -23,3 +23,6 @@ WHATSAPP_ALERT_TEMPLATE = os.environ.get("WHATSAPP_ALERT_TEMPLATE")
 QUOTE_LINK_SECRET = os.environ.get("QUOTE_LINK_SECRET")
 # Optional: lets Jack read rough quote messages with AI. Typed quotes work without it.
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+# Optional: button templates from create_button_templates.py. Replies have no buttons without them.
+WHATSAPP_DRAFT_BUTTONS = os.environ.get("WHATSAPP_DRAFT_BUTTONS")
+WHATSAPP_FINAL_BUTTONS = os.environ.get("WHATSAPP_FINAL_BUTTONS")
