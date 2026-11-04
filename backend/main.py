@@ -7,6 +7,7 @@ from twilio.twiml.messaging_response import MessagingResponse
 from twilio.twiml.voice_response import VoiceResponse
 
 import settings
+from ai import read_quote
 from database import (
     create_tables,
     delete_old_calls,
@@ -200,7 +201,8 @@ def greeting(business_name, texted):
 
 def quote_reply(client, details):
     """Save a draft quote and return our reply and a link to its PDF (or None)."""
-    quote = parse_quote(details)
+    # The exact typed format first: it's free and can't be misread. Then the AI.
+    quote = parse_quote(details) or read_quote(details)
     if quote is None:
         return QUOTE_HELP, None
     quote_id = save_quote(client.id, **quote)

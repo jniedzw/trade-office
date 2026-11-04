@@ -21,3 +21,5 @@ WHATSAPP_NUMBER = os.environ.get("WHATSAPP_NUMBER")
 WHATSAPP_ALERT_TEMPLATE = os.environ.get("WHATSAPP_ALERT_TEMPLATE")
 # Optional: signs quote PDF links. Quote PDFs can't be downloaded until it's set.
 QUOTE_LINK_SECRET = os.environ.get("QUOTE_LINK_SECRET")
+# Optional: lets Jack read rough quote messages with AI. Typed quotes work without it.
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")

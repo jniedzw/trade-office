@@ -43,6 +43,8 @@ def use_fakes(monkeypatch, tmp_path, active=True, failing=()):
     monkeypatch.setattr(settings, "WHATSAPP_ALERT_TEMPLATE", "HX_FAKE")
     # Off unless a test turns it on, whatever the real .env says.
     monkeypatch.setattr(settings, "QUOTE_LINK_SECRET", None)
+    # Tests must never reach the real AI, which costs money.
+    monkeypatch.setattr(main, "read_quote", lambda details: None)
     # The cleanup job must never reach the real Twilio account from a test.
     monkeypatch.setattr(main, "count_old_twilio_records", lambda cutoff: (0, 0))
 
@@ -877,3 +879,20 @@ def test_quote_can_be_on_its_own_line(monkeypatch, tmp_path):
     )
 
     assert text.startswith("Draft quote 1 saved")
+
+
+def test_a_rough_quote_is_read_by_the_ai(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    quote = {
+        "customer_name": "Mrs Jones",
+        "title": "Bathroom refit",
+        "job_code": "BR",
+        "total_pence": 125000,
+        "lines": ["Remove old suite"],
+    }
+    monkeypatch.setattr(main, "read_quote", lambda details: quote)
+
+    text, link = main.whatsapp_reply(f"whatsapp:{OWNER}", "quote bathroom mrs jones 1250")
+
+    assert text.startswith("Draft quote 1 saved: Bathroom refit for Mrs Jones")
+    assert database.get_quote_lines(1) == ["Remove old suite"]
