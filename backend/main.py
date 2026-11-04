@@ -29,7 +29,14 @@ from database import (
     set_whatsapp_alerts,
     whatsapp_alerts_on,
 )
-from quotes import QUOTE_HELP, link_is_valid, make_quote_pdf, money, parse_quote
+from quotes import (
+    QUOTE_HELP,
+    link_is_valid,
+    make_quote_pdf,
+    money,
+    parse_quote,
+    quote_link,
+)
 from sms import count_old_twilio_records, send_sms, send_whatsapp_alert
 
 # The usual opt-out and opt-in words for text messages.
@@ -191,34 +198,38 @@ def greeting(business_name, texted):
 
 
 def quote_reply(client, details):
-    """Save a draft quote from the owner's message and return our reply."""
+    """Save a draft quote and return our reply and a link to its PDF (or None)."""
     quote = parse_quote(details)
     if quote is None:
-        return QUOTE_HELP
+        return QUOTE_HELP, None
     quote_id = save_quote(client.id, **quote)
-    return (
+    text = (
         f"Draft quote {quote_id} saved: {quote['title']} for "
         f"{quote['customer_name']}, {money(quote['total_pence'])}."
     )
+    # Without the secret no link would work, so send the words on their own.
+    if not settings.QUOTE_LINK_SECRET:
+        return text, None
+    return text, quote_link(quote_id, now_utc())
 
 
 def whatsapp_reply(sender, body=""):
-    """Handle a WhatsApp message and return our reply."""
+    """Handle a WhatsApp message and return our reply and a file link (or None)."""
     # Twilio writes WhatsApp numbers as "whatsapp:+447...", so take that off first.
     client = get_client_by_owner(sender.removeprefix("whatsapp:"))
     if client is None or not client.active:
-        return WHATSAPP_NOT_A_CLIENT
+        return WHATSAPP_NOT_A_CLIENT, None
 
     command = body.strip().upper()
     if command == "ALERTS ON":
         set_whatsapp_alerts(client.id, True)
-        return "Done. Missed-call alerts will come here. Send ALERTS OFF for texts."
+        return "Done. Missed-call alerts will come here. Send ALERTS OFF for texts.", None
     if command == "ALERTS OFF":
         set_whatsapp_alerts(client.id, False)
-        return "Done. Missed-call alerts will come by text."
+        return "Done. Missed-call alerts will come by text.", None
     if command == "QUOTE" or command.startswith("QUOTE "):
         return quote_reply(client, body.strip()[len("QUOTE"):])
-    return f"Hi, it's Jack. {client.business_name} is connected to WhatsApp."
+    return f"Hi, it's Jack. {client.business_name} is connected to WhatsApp.", None
 
 
 def forward_message(sender, body):
@@ -313,8 +324,12 @@ async def incoming_whatsapp(
     await check_twilio_signature(request)
 
     # Replying in the response sends it straight back through WhatsApp.
+    text, link = whatsapp_reply(From, Body)
     twiml = MessagingResponse()
-    twiml.message(whatsapp_reply(From, Body))
+    message = twiml.message(text)
+    if link:
+        # Twilio fetches the file from the link and sends it with the words.
+        message.media(link)
     return Response(content=str(twiml), media_type="application/xml")
 
 

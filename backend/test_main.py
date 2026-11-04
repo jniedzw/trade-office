@@ -41,6 +41,8 @@ def use_fakes(monkeypatch, tmp_path, active=True, failing=()):
     monkeypatch.setattr(settings, "ALERT_MOBILE", JAMES)
     monkeypatch.setattr(settings, "WHATSAPP_NUMBER", OUR_NUMBER)
     monkeypatch.setattr(settings, "WHATSAPP_ALERT_TEMPLATE", "HX_FAKE")
+    # Off unless a test turns it on, whatever the real .env says.
+    monkeypatch.setattr(settings, "QUOTE_LINK_SECRET", None)
     # The cleanup job must never reach the real Twilio account from a test.
     monkeypatch.setattr(main, "count_old_twilio_records", lambda cutoff: (0, 0))
 
@@ -521,9 +523,9 @@ def test_owner_alert_for_a_repeat_caller():
     )
 
 
-def signed_whatsapp(sender):
+def signed_whatsapp(sender, body="Hi"):
     """Send /whatsapp a fake message, signed the same way Twilio signs real ones."""
-    form = {"From": f"whatsapp:{sender}", "To": f"whatsapp:{OUR_NUMBER}", "Body": "Hi"}
+    form = {"From": f"whatsapp:{sender}", "To": f"whatsapp:{OUR_NUMBER}", "Body": body}
     validator = RequestValidator(settings.TWILIO_AUTH_TOKEN)
     signature = validator.compute_signature(settings.PUBLIC_URL + "/whatsapp", form)
     return client.post(
@@ -709,7 +711,9 @@ def test_whatsapp_status_rejects_missing_signature(monkeypatch, tmp_path):
 def test_alerts_on_and_off_by_whatsapp(monkeypatch, tmp_path):
     use_fakes(monkeypatch, tmp_path)
 
-    assert main.whatsapp_reply(f"whatsapp:{OWNER}", " alerts on ").startswith("Done")
+    text, link = main.whatsapp_reply(f"whatsapp:{OWNER}", " alerts on ")
+    assert text.startswith("Done")
+    assert link is None
     assert database.whatsapp_alerts_on(1) is True
 
     main.whatsapp_reply(f"whatsapp:{OWNER}", "ALERTS OFF")
@@ -748,7 +752,7 @@ def test_owner_can_save_a_quote_by_whatsapp(monkeypatch, tmp_path):
         f"whatsapp:{OWNER}", "quote Mrs Jones | Bathroom refit | BR | 1250.50"
     )
 
-    assert reply == "Draft quote 1 saved: Bathroom refit for Mrs Jones, £1,250.50."
+    assert reply == ("Draft quote 1 saved: Bathroom refit for Mrs Jones, £1,250.50.", None)
     assert database.get_quote(1).total_pence == 125050
 
 
@@ -757,7 +761,7 @@ def test_a_badly_written_quote_gets_help(monkeypatch, tmp_path):
 
     reply = main.whatsapp_reply(f"whatsapp:{OWNER}", "QUOTE bathroom about 1250")
 
-    assert reply == main.QUOTE_HELP
+    assert reply == (main.QUOTE_HELP, None)
     assert database.get_quote(1) is None
 
 
@@ -768,7 +772,7 @@ def test_a_stranger_cant_make_a_quote(monkeypatch, tmp_path):
         f"whatsapp:{MOBILE_CALLER}", "QUOTE Mrs Jones | Bathroom | BR | 100"
     )
 
-    assert reply == main.WHATSAPP_NOT_A_CLIENT
+    assert reply == (main.WHATSAPP_NOT_A_CLIENT, None)
     assert database.get_quote(1) is None
 
 
@@ -825,3 +829,26 @@ def test_no_links_work_without_a_secret(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "QUOTE_LINK_SECRET", None)
 
     assert client.get(path_of(link)).status_code == 403
+
+
+def test_a_quote_reply_links_to_its_pdf(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    monkeypatch.setattr(settings, "QUOTE_LINK_SECRET", "test-secret")
+
+    text, link = main.whatsapp_reply(
+        f"whatsapp:{OWNER}", "QUOTE Mrs Jones | Bathroom refit | BR | 1250"
+    )
+
+    assert text.startswith("Draft quote 1 saved")
+    assert link.startswith(f"{settings.PUBLIC_URL}/quotes/1.pdf?expires=")
+    # The link in the reply really downloads the PDF.
+    assert client.get(path_of(link)).content.startswith(b"%PDF-")
+
+
+def test_whatsapp_reply_attaches_the_pdf(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    monkeypatch.setattr(settings, "QUOTE_LINK_SECRET", "test-secret")
+
+    response = signed_whatsapp(OWNER, "QUOTE Mrs Jones | Bathroom refit | BR | 1250")
+
+    assert "<Media>" in response.text
