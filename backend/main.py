@@ -14,6 +14,7 @@ from database import (
     get_client_by_number,
     get_client_by_owner,
     get_quote,
+    get_quote_lines,
     get_recent_calls,
     is_opted_out,
     is_skipped,
@@ -203,9 +204,11 @@ def quote_reply(client, details):
     if quote is None:
         return QUOTE_HELP, None
     quote_id = save_quote(client.id, **quote)
+    count = len(quote["lines"])
+    lines = "1 line" if count == 1 else f"{count} lines"
     text = (
         f"Draft quote {quote_id} saved: {quote['title']} for "
-        f"{quote['customer_name']}, {money(quote['total_pence'])}."
+        f"{quote['customer_name']}, {money(quote['total_pence'])}, {lines} of work."
     )
     # Without the secret no link would work, so send the words on their own.
     if not settings.QUOTE_LINK_SECRET:
@@ -227,7 +230,8 @@ def whatsapp_reply(sender, body=""):
     if command == "ALERTS OFF":
         set_whatsapp_alerts(client.id, False)
         return "Done. Missed-call alerts will come by text.", None
-    if command == "QUOTE" or command.startswith("QUOTE "):
+    # The first word, so "QUOTE" can be followed by a space or a new line.
+    if command.split()[:1] == ["QUOTE"]:
         return quote_reply(client, body.strip()[len("QUOTE"):])
     return f"Hi, it's Jack. {client.business_name} is connected to WhatsApp.", None
 
@@ -341,7 +345,8 @@ def quote_pdf(quote_id: int, expires: int = 0, sig: str = ""):
     quote = get_quote(quote_id)
     if quote is None:
         raise HTTPException(status_code=404, detail="Quote not found")
-    pdf = make_quote_pdf(quote, get_client(quote.client_id).business_name)
+    business_name = get_client(quote.client_id).business_name
+    pdf = make_quote_pdf(quote, business_name, get_quote_lines(quote_id))
     return Response(content=pdf, media_type="application/pdf")
 
 

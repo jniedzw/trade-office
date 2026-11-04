@@ -752,7 +752,10 @@ def test_owner_can_save_a_quote_by_whatsapp(monkeypatch, tmp_path):
         f"whatsapp:{OWNER}", "quote Mrs Jones | Bathroom refit | BR | 1250.50"
     )
 
-    assert reply == ("Draft quote 1 saved: Bathroom refit for Mrs Jones, £1,250.50.", None)
+    assert reply == (
+        "Draft quote 1 saved: Bathroom refit for Mrs Jones, £1,250.50, 0 lines of work.",
+        None,
+    )
     assert database.get_quote(1).total_pence == 125050
 
 
@@ -852,3 +855,25 @@ def test_whatsapp_reply_attaches_the_pdf(monkeypatch, tmp_path):
     response = signed_whatsapp(OWNER, "QUOTE Mrs Jones | Bathroom refit | BR | 1250")
 
     assert "<Media>" in response.text
+
+
+def test_a_quote_with_lines_by_whatsapp(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    text, link = main.whatsapp_reply(
+        f"whatsapp:{OWNER}",
+        "QUOTE Mrs Jones | Bathroom refit | BR | 1250\n- Remove old suite\n- Fit basin",
+    )
+
+    assert text.endswith("£1,250.00, 2 lines of work.")
+    assert database.get_quote_lines(1) == ["Remove old suite", "Fit basin"]
+
+
+def test_quote_can_be_on_its_own_line(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    text, link = main.whatsapp_reply(
+        f"whatsapp:{OWNER}", "Quote\nMrs Jones | Bathroom refit | BR | 1250"
+    )
+
+    assert text.startswith("Draft quote 1 saved")

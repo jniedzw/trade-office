@@ -96,6 +96,16 @@ class Quote(SQLModel, table=True):
     time: datetime = Field(default_factory=now_utc)
 
 
+class QuoteLine(SQLModel, table=True):
+    """One line of a quote's scope of works, like "Fit new basin"."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    quote_id: int = Field(foreign_key="quote.id", index=True)
+    # Keeps the lines in the order they were written.
+    position: int
+    text: str
+
+
 def create_tables():
     """Create any tables that don't exist yet."""
     SQLModel.metadata.create_all(engine)
@@ -175,8 +185,8 @@ def get_client(client_id):
         return session.get(Client, client_id)
 
 
-def save_quote(client_id, customer_name, title, job_code, total_pence):
-    """Save a new draft quote and return its ID."""
+def save_quote(client_id, customer_name, title, job_code, total_pence, lines=()):
+    """Save a new draft quote and its scope of works, and return its ID."""
     quote = Quote(
         client_id=client_id,
         customer_name=customer_name,
@@ -186,9 +196,12 @@ def save_quote(client_id, customer_name, title, job_code, total_pence):
     )
     with Session(engine) as session:
         session.add(quote)
+        # flush sends the quote to the database without committing, so it gets an ID
+        # the lines can point to. One commit then saves all of it, or none of it.
+        session.flush()
+        for position, text in enumerate(lines):
+            session.add(QuoteLine(quote_id=quote.id, position=position, text=text))
         session.commit()
-        # The database chooses the ID, so reload the quote to read it.
-        session.refresh(quote)
         return quote.id
 
 
@@ -196,6 +209,17 @@ def get_quote(quote_id):
     """Return the quote with this ID, or None."""
     with Session(engine) as session:
         return session.get(Quote, quote_id)
+
+
+def get_quote_lines(quote_id):
+    """Return the text of a quote's scope of works, in order."""
+    with Session(engine) as session:
+        statement = (
+            select(QuoteLine)
+            .where(QuoteLine.quote_id == quote_id)
+            .order_by(QuoteLine.position)
+        )
+        return [line.text for line in session.exec(statement).all()]
 
 
 def get_recent_calls(client_id, caller):

@@ -140,3 +140,22 @@ def test_get_quote_returns_none_for_unknown_id(monkeypatch, tmp_path):
     use_temp_database(monkeypatch, tmp_path)
 
     assert database.get_quote(99) is None
+
+
+def test_save_quote_keeps_the_lines_in_order(monkeypatch, tmp_path):
+    engine = use_temp_database(monkeypatch, tmp_path)
+    add_client(engine, TWILIO_NUMBER)
+    lines = ["Remove old suite", "Fit new basin", "Tile the floor"]
+
+    quote_id = database.save_quote(1, "Mrs Jones", "Bathroom refit", "BR", 125050, lines)
+
+    assert database.get_quote_lines(quote_id) == lines
+
+
+def test_a_quote_with_no_lines(monkeypatch, tmp_path):
+    engine = use_temp_database(monkeypatch, tmp_path)
+    add_client(engine, TWILIO_NUMBER)
+
+    quote_id = database.save_quote(1, "Mr Smith", "Boiler service", "BS", 8500)
+
+    assert database.get_quote_lines(quote_id) == []

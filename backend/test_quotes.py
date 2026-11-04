@@ -30,6 +30,7 @@ def test_parse_quote_reads_all_four_parts():
         "title": "Bathroom refit",
         "job_code": "BR",
         "total_pence": 125050,
+        "lines": [],
     }
 
 
@@ -71,4 +72,33 @@ def test_make_quote_pdf_returns_a_pdf():
     pdf = make_quote_pdf(quote, "Test Plumbing")
 
     # Every PDF file starts with these bytes.
+    assert pdf.startswith(b"%PDF-")
+
+
+def test_parse_quote_reads_the_scope_of_works():
+    quote = parse_quote(
+        "Mrs Jones | Bathroom refit | BR | 1250\n- Remove old suite\n\n• Fit new basin "
+    )
+
+    assert quote["lines"] == ["Remove old suite", "Fit new basin"]
+
+
+def test_parse_quote_rejects_a_line_that_isnt_a_bullet():
+    assert parse_quote("Mrs Jones | Bathroom | BR | 1250\nRemove old suite") is None
+    assert parse_quote("Mrs Jones | Bathroom | BR | 1250\n- ") is None
+
+
+def test_make_quote_pdf_with_a_scope_of_works():
+    quote = Quote(
+        id=1,
+        client_id=1,
+        customer_name="Mrs Jones",
+        title="Bathroom refit",
+        job_code="BR",
+        total_pence=125050,
+        time=datetime(2026, 11, 4, tzinfo=timezone.utc),
+    )
+
+    pdf = make_quote_pdf(quote, "Test Plumbing", ["Remove <old> suite", "Fit basin"])
+
     assert pdf.startswith(b"%PDF-")

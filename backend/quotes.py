@@ -15,13 +15,21 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 import settings
 
-QUOTE_HELP = "To make a quote, send: QUOTE Mrs Jones | Bathroom refit | BR | 1250.50"
+QUOTE_HELP = (
+    "To make a quote, send:\n"
+    "QUOTE Mrs Jones | Bathroom refit | BR | 1250.50\n"
+    "- Remove old suite\n"
+    "- Fit new basin and toilet"
+)
+# Phones often turn "-" into a bullet, so take either.
+BULLETS = ("-", "•")
 
 # How long a quote PDF link works for.
 LINK_DAYS = 7
 
 BODY = ParagraphStyle("body", fontName="Helvetica", fontSize=11, leading=16)
 GREY = ParagraphStyle("grey", parent=BODY, textColor=colors.HexColor("#666666"))
+BOLD = ParagraphStyle("bold", parent=BODY, fontName="Helvetica-Bold")
 BIG = ParagraphStyle("big", parent=BODY, fontName="Helvetica-Bold", fontSize=18, leading=24)
 
 
@@ -51,9 +59,27 @@ def to_pence(price):
     return int(pounds * 100)
 
 
+def parse_scope(lines):
+    """Return the text of lines like "- Fit new basin", or None if one isn't a bullet."""
+    scope = []
+    for line in lines:
+        line = line.strip()
+        if line == "":
+            continue
+        if not line.startswith(BULLETS) or line[1:].strip() == "":
+            return None
+        scope.append(line[1:].strip())
+    return scope
+
+
 def parse_quote(details):
-    """Read "Mrs Jones | Bathroom refit | BR | 1250.50" into a dict, or None."""
-    parts = [part.strip() for part in details.split("|")]
+    """Read "Mrs Jones | Bathroom refit | BR | 1250.50" and any "- " lines
+    under it into a dict, or None if it isn't written that way."""
+    first_line, *other_lines = details.strip().splitlines() or [""]
+    scope = parse_scope(other_lines)
+    if scope is None:
+        return None
+    parts = [part.strip() for part in first_line.split("|")]
     if len(parts) != 4 or "" in parts:
         return None
     customer_name, title, job_code, price = parts
@@ -68,6 +94,7 @@ def parse_quote(details):
         "title": title,
         "job_code": job_code.upper(),
         "total_pence": total_pence,
+        "lines": scope,
     }
 
 
@@ -79,7 +106,7 @@ def reference(prefix, job_code, day):
     return f"{prefix}-{job_code}-{day.strftime('%d%m%y')}"
 
 
-def make_quote_pdf(quote, business_name):
+def make_quote_pdf(quote, business_name, lines=()):
     """Return the quote as a PDF, as bytes ready to send."""
     # Built in memory, not saved: the server's disk is no place for customer files.
     buffer = BytesIO()
@@ -95,8 +122,12 @@ def make_quote_pdf(quote, business_name):
         Paragraph(f"For: {escape(quote.customer_name)}", BODY),
         Paragraph(f"Work: {escape(quote.title)}", BODY),
         Spacer(1, 6 * mm),
-        Paragraph(f"Total: {money(quote.total_pence)}", BIG),
     ]
+    if lines:
+        content.append(Paragraph("Scope of works", BOLD))
+        content += [Paragraph(f"• {escape(line)}", BODY) for line in lines]
+        content.append(Spacer(1, 6 * mm))
+    content.append(Paragraph(f"Total: {money(quote.total_pence)}", BIG))
     document = SimpleDocTemplate(buffer, pagesize=A4, title=f"Quote {ref}")
     document.build(content)
     return buffer.getvalue()
