@@ -106,17 +106,28 @@ def reference(prefix, job_code, day):
     return f"{prefix}-{job_code}-{day.strftime('%d%m%y')}"
 
 
-def make_quote_pdf(quote, business_name, lines=()):
-    """Return the quote as a PDF, as bytes ready to send."""
+def lines_of(text):
+    """Return text with its new lines kept, safe for reportlab."""
+    return escape(text).replace("\n", "<br/>")
+
+
+def make_quote_pdf(quote, business_name, lines=(), details=None):
+    """Return the quote as a PDF, as bytes ready to send.
+
+    details is the client's BusinessDetails, or None if they haven't been added.
+    """
     # Built in memory, not saved: the server's disk is no place for customer files.
     buffer = BytesIO()
     heading = "DRAFT QUOTATION" if quote.status == "draft" else "QUOTATION"
-    # The quote's ID makes the reference unique until clients have their own letters.
-    ref = reference(f"Q{quote.id}", quote.job_code, quote.time)
+    letters = details.ref_letters if details else "Q"
+    # The quote's ID on the end keeps two jobs on the same day apart.
+    ref = f"{reference(letters, quote.job_code, quote.time)}-{quote.id}"
 
     # escape() stops a name like "Smith & Sons" breaking reportlab's markup.
-    content = [
-        Paragraph(escape(business_name), BIG),
+    content = [Paragraph(escape(business_name), BIG)]
+    if details:
+        content.append(Paragraph(lines_of(f"{details.legal_name}\n{details.address}"), GREY))
+    content += [
         Paragraph(f"{heading}, {uk_date(quote.time)}, Ref: {ref}", GREY),
         Spacer(1, 10 * mm),
         Paragraph(f"For: {escape(quote.customer_name)}", BODY),
@@ -128,6 +139,9 @@ def make_quote_pdf(quote, business_name, lines=()):
         content += [Paragraph(f"• {escape(line)}", BODY) for line in lines]
         content.append(Spacer(1, 6 * mm))
     content.append(Paragraph(f"Total: {money(quote.total_pence)}", BIG))
+    if details:
+        days = details.payment_days
+        content.append(Paragraph(f"Payment due within {days} days of the invoice.", GREY))
     document = SimpleDocTemplate(buffer, pagesize=A4, title=f"Quote {ref}")
     document.build(content)
     return buffer.getvalue()

@@ -54,12 +54,16 @@ sequenceDiagram
 ```
 backend/
   main.py          # FastAPI app and endpoints
-  database.py      # SQLModel tables (Client, Call) and lookups
+  database.py      # SQLModel tables (clients, calls, quotes) and lookups
   sms.py           # send_sms() using the Twilio client
+  quotes.py        # read typed quotes, make quote PDFs, sign download links
+  ai.py            # read rough quote messages with Claude
+  eval_quotes.py   # check the AI against 20 made-up messages (costs a few pence)
   settings.py      # app-wide settings read from .env
   add_client.py    # add a real client by answering questions
   list_clients.py  # show every client
   update_client.py # change a client's details, or pause them
+  set_business_details.py  # a client's legal name, address and bank details
   add_skip_numbers.py  # add a client's family and friends (never texted)
   seed.py          # add two fake clients for local testing
   requirements.txt

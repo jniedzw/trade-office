@@ -11,6 +11,7 @@ from ai import read_quote
 from database import (
     create_tables,
     delete_old_calls,
+    get_business_details,
     get_client,
     get_client_by_number,
     get_client_by_owner,
@@ -348,7 +349,8 @@ def quote_pdf(quote_id: int, expires: int = 0, sig: str = ""):
     if quote is None:
         raise HTTPException(status_code=404, detail="Quote not found")
     business_name = get_client(quote.client_id).business_name
-    pdf = make_quote_pdf(quote, business_name, get_quote_lines(quote_id))
+    details = get_business_details(quote.client_id)
+    pdf = make_quote_pdf(quote, business_name, get_quote_lines(quote_id), details)
     return Response(content=pdf, media_type="application/pdf")
 
 

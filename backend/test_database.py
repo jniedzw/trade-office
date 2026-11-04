@@ -159,3 +159,22 @@ def test_a_quote_with_no_lines(monkeypatch, tmp_path):
     quote_id = database.save_quote(1, "Mr Smith", "Boiler service", "BS", 8500)
 
     assert database.get_quote_lines(quote_id) == []
+
+
+def test_business_details_can_be_added_then_changed(monkeypatch, tmp_path):
+    engine = use_temp_database(monkeypatch, tmp_path)
+    add_client(engine, TWILIO_NUMBER)
+    details = {
+        "legal_name": "Test Person t/a Test Plumbing",
+        "address": "1 Test Street\nLiverpool",
+        "ref_letters": "TP",
+        "bank_details": "Test Bank",
+    }
+
+    assert database.get_business_details(1) is None
+    database.save_business_details(1, **details)
+    database.save_business_details(1, **(details | {"payment_days": 30}))
+
+    saved = database.get_business_details(1)
+    assert saved.ref_letters == "TP"
+    assert saved.payment_days == 30

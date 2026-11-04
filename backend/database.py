@@ -106,6 +106,20 @@ class QuoteLine(SQLModel, table=True):
     text: str
 
 
+class BusinessDetails(SQLModel, table=True):
+    """What a client's quotes and invoices need: who they are and how to pay them."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    client_id: int = Field(foreign_key="client.id", unique=True)
+    legal_name: str
+    # Lines separated by "\n", so it prints the way it's written.
+    address: str
+    # Letters at the start of their references, like DPL.
+    ref_letters: str
+    payment_days: int = 14
+    bank_details: str
+
+
 def create_tables():
     """Create any tables that don't exist yet."""
     SQLModel.metadata.create_all(engine)
@@ -203,6 +217,24 @@ def save_quote(client_id, customer_name, title, job_code, total_pence, lines=())
             session.add(QuoteLine(quote_id=quote.id, position=position, text=text))
         session.commit()
         return quote.id
+
+
+def get_business_details(client_id):
+    """Return this client's business details, or None if they haven't been added."""
+    with Session(engine) as session:
+        statement = select(BusinessDetails).where(BusinessDetails.client_id == client_id)
+        return session.exec(statement).first()
+
+
+def save_business_details(client_id, **details):
+    """Add this client's business details, or replace the ones already saved."""
+    with Session(engine) as session:
+        statement = select(BusinessDetails).where(BusinessDetails.client_id == client_id)
+        row = session.exec(statement).first() or BusinessDetails(client_id=client_id)
+        for name, value in details.items():
+            setattr(row, name, value)
+        session.add(row)
+        session.commit()
 
 
 def get_quote(quote_id):

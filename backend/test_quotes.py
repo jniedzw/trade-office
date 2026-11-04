@@ -1,6 +1,6 @@
 from datetime import date, datetime, timezone
 
-from database import Quote
+from database import BusinessDetails, Quote
 from quotes import make_quote_pdf, money, parse_quote, reference, to_pence, uk_date
 
 
@@ -102,3 +102,24 @@ def test_make_quote_pdf_with_a_scope_of_works():
     pdf = make_quote_pdf(quote, "Test Plumbing", ["Remove <old> suite", "Fit basin"])
 
     assert pdf.startswith(b"%PDF-")
+
+
+def test_make_quote_pdf_with_business_details():
+    quote = Quote(
+        id=7,
+        client_id=1,
+        customer_name="Mrs Jones",
+        title="Bathroom refit",
+        job_code="BR",
+        total_pence=125050,
+        time=datetime(2026, 11, 4, tzinfo=timezone.utc),
+    )
+    details = BusinessDetails(
+        client_id=1,
+        legal_name="Test Person t/a Test & Co",
+        address="1 Test Street\nLiverpool",
+        ref_letters="TP",
+        bank_details="Test Bank",
+    )
+
+    assert make_quote_pdf(quote, "Test & Co", ["Fit basin"], details).startswith(b"%PDF-")
