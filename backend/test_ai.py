@@ -1,9 +1,22 @@
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 import anthropic
 import httpx2
 
 import ai
 import settings
-from ai import JobDraft, QuoteDraft, change_quote, prices_in, read_job, read_quote, uk_mobile
+from ai import (
+    BookingDraft,
+    JobDraft,
+    QuoteDraft,
+    change_quote,
+    prices_in,
+    read_booking,
+    read_job,
+    read_quote,
+    uk_mobile,
+)
 from database import Quote
 
 MESSAGE = "bathroom for mrs jones, rip out old suite, new basin and loo, 1,250 all in"
@@ -159,3 +172,23 @@ def test_read_quote_checks_the_price_against_only_what_was_typed(monkeypatch):
 
     # "3" is in the job's description, but not in what the tradesperson typed.
     assert read_quote("For Mrs Jones: 3 radiators. 1,250 all in", typed="1,250 all in") is None
+
+
+THURSDAY = datetime(2026, 11, 5, 18, 0, tzinfo=ZoneInfo("Europe/London"))
+
+
+def test_read_booking(monkeypatch):
+    use_fake_claude(monkeypatch, BookingDraft(date="2026-11-09", time="09:00", end_date=None))
+
+    starts_at, ends_on = read_booking("monday 9am", THURSDAY)
+
+    assert starts_at == datetime(2026, 11, 9, 9, 0, tzinfo=ZoneInfo("Europe/London"))
+    assert ends_on is None
+
+
+def test_read_booking_rejects_a_bad_date(monkeypatch):
+    use_fake_claude(monkeypatch, BookingDraft(date="2026-11-02", time=None, end_date=None))
+    assert read_booking("last monday", THURSDAY) is None
+
+    use_fake_claude(monkeypatch, BookingDraft(date="soon", time=None, end_date=None))
+    assert read_booking("soon", THURSDAY) is None

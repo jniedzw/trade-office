@@ -1,11 +1,13 @@
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from fastapi.testclient import TestClient
 from sqlmodel import Session, create_engine, select
 from twilio.request_validator import RequestValidator
 
 import database
+import diary
 import main
 import menu
 import quotes
@@ -47,6 +49,7 @@ def use_fakes(monkeypatch, tmp_path, active=True, failing=()):
     # Tests must never reach the real AI, which costs money.
     monkeypatch.setattr(main, "read_quote", lambda details, typed=None: None)
     monkeypatch.setattr(main, "read_job", lambda details: None)
+    monkeypatch.setattr(main, "read_booking", lambda message, now_uk: None)
     monkeypatch.setattr(main, "change_quote", lambda quote, lines, change: None)
     monkeypatch.setattr(settings, "WHATSAPP_DRAFT_BUTTONS", None)
     monkeypatch.setattr(settings, "WHATSAPP_FINAL_BUTTONS", None)
@@ -1550,3 +1553,86 @@ def test_paid_for_an_invoice_that_isnt_theirs(monkeypatch, tmp_path):
     text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "PAID 7")
 
     assert text == "There's no invoice 7 for Test Plumbing."
+
+
+MONDAY_9AM = datetime(2026, 11, 9, 9, 0, tzinfo=ZoneInfo("Europe/London"))
+
+
+def test_book_it_books_a_logged_job(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    log_test_job()
+    monkeypatch.setattr(main, "read_booking", lambda message, now_uk: (MONDAY_9AM, None))
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "BOOK JOB 1")
+    assert text.startswith("When's Mrs Jones's job?")
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "monday 9am")
+    assert text == "Booked: Mrs Jones, Leaking radiator, Mon 9 Nov, 9am."
+    assert database.get_job(1).status == "booked"
+
+
+def test_an_unclear_time_asks_again(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    log_test_job()
+
+    main.whatsapp_reply(f"whatsapp:{OWNER}", "BOOK JOB 1")
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "sometime soon")
+    assert "I couldn't tell from that" in text
+
+    # Still waiting for the time, so the next answer books it.
+    monkeypatch.setattr(main, "read_booking", lambda message, now_uk: (MONDAY_9AM, None))
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "monday 9am")
+    assert text.startswith("Booked: Mrs Jones")
+
+
+def test_book_a_new_job_in_one_message(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    job = {"customer_name": "Mr Smith", "work": "Boiler service", "customer_phone": None, "address": None}
+    monkeypatch.setattr(main, "read_job", lambda details: job)
+    monkeypatch.setattr(main, "read_booking", lambda message, now_uk: (MONDAY_9AM, None))
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "BOOK Mr Smith boiler service monday 9am")
+
+    assert text == "Booked: Mr Smith, Boiler service, Mon 9 Nov, 9am."
+    assert database.get_job(1).status == "booked"
+
+
+def test_a_client_cant_book_another_clients_job(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    log_test_job()
+    other_owner = "+447700900790"
+    with Session(database.engine) as session:
+        session.add(
+            Client(
+                business_name="Other Plumbing",
+                owner_mobile=other_owner,
+                twilio_number="+447700900457",
+                text_back_message="Hi",
+            )
+        )
+        session.commit()
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{other_owner}", "BOOK JOB 1")
+
+    assert text == "There's no job 1 for Other Plumbing."
+
+
+def test_week_lists_booked_jobs(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    log_test_job()
+    tomorrow = diary.uk_now(database.now_utc()).date() + timedelta(days=1)
+    tomorrow_2pm = datetime(tomorrow.year, tomorrow.month, tomorrow.day, 14, tzinfo=diary.UK)
+    database.book_job(1, tomorrow_2pm)
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "What's on this week")
+
+    assert text.startswith("Your week:\n")
+    assert "  2pm Mrs Jones: Leaking radiator (12 Test Road)" in text
+
+
+def test_nothing_booked(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "WEEK")
+
+    assert text == "Nothing booked for the next 7 days."

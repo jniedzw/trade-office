@@ -28,6 +28,7 @@ TEMPLATES = {
     # Under a logged job, where {{2}} is the job number.
     "WHATSAPP_JOB_BUTTONS": [
         {"title": "Quote it", "id": "QUOTE JOB {{2}}"},
+        {"title": "Book it", "id": "BOOK JOB {{2}}"},
     ],
 }
 

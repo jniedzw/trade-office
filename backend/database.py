@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import inspect, text
 from sqlmodel import Field, Session, SQLModel, UniqueConstraint, create_engine, select
@@ -156,9 +156,12 @@ class Job(SQLModel, table=True):
     customer_phone: str | None = None
     address: str | None = None
     work: str
-    # logged, then quoted, booked, done, invoiced and paid as those features arrive.
+    # logged, then quoted, booked, invoiced and paid.
     status: str = "logged"
     time: datetime = Field(default_factory=now_utc)
+    # When it's booked for, saved in UTC, and the last day of a job that runs over days.
+    starts_at: datetime | None = None
+    ends_on: date | None = None
 
 
 class PriceItem(SQLModel, table=True):
@@ -192,6 +195,8 @@ NEW_COLUMNS = [
     ("businessdetails", "contact", "VARCHAR NOT NULL DEFAULT ''"),
     ("quote", "job_id", "INTEGER"),
     ("invoice", "paid_at", "DATETIME"),
+    ("job", "starts_at", "DATETIME"),
+    ("job", "ends_on", "DATE"),
 ]
 
 
@@ -506,6 +511,31 @@ def save_job(client_id, customer_name, work, customer_phone=None, address=None):
         session.commit()
         session.refresh(job)
         return job.id
+
+
+def book_job(job_id, starts_at, ends_on=None):
+    """Book a job in for starts_at (any timezone; saved as UTC), maybe running to ends_on."""
+    with Session(engine) as session:
+        job = session.get(Job, job_id)
+        job.starts_at = starts_at.astimezone(timezone.utc)
+        job.ends_on = ends_on
+        # A job that's already been invoiced or paid keeps that status.
+        if job.status in ("logged", "quoted"):
+            job.status = "booked"
+        session.add(job)
+        session.commit()
+
+
+def booked_jobs(client_id, since):
+    """Return this client's jobs booked to start in the 60 days before since, or later.
+
+    A long job that started earlier can still be running, so the diary picks the days.
+    """
+    with Session(engine) as session:
+        statement = select(Job).where(
+            Job.client_id == client_id, Job.starts_at >= since - timedelta(days=60)
+        )
+        return session.exec(statement).all()
 
 
 def get_job(job_id):

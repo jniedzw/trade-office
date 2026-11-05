@@ -6,6 +6,7 @@ import re
 import anthropic
 from pydantic import BaseModel
 
+import diary
 import settings
 from quotes import to_pence
 
@@ -42,6 +43,25 @@ Pick out:
 - address: the job's address as written, with each part on a new line, or null.
 - work: a short description of the work, like "Leaking radiator in the kitchen".
 Never make up a phone number or address: use null if they didn't write one."""
+
+
+BOOKING_INSTRUCTIONS = """You read when a UK tradesperson has booked a job in.
+{today}
+Answer with:
+- date: the day the job starts, as YYYY-MM-DD. A weekday like "Monday" means the next
+  one after today, or today if they say "today".
+- time: the start time as HH:MM in 24-hour time, or null if they don't give one.
+- end_date: the last day as YYYY-MM-DD for a job over several days ("Mon to Fri",
+  "3 days"), or null for a one-day job.
+If they don't say a day at all, use null for date."""
+
+
+class BookingDraft(BaseModel):
+    """The shape Claude must answer in when reading a booking."""
+
+    date: str | None
+    time: str | None
+    end_date: str | None
 
 
 class JobDraft(BaseModel):
@@ -175,3 +195,21 @@ def read_job(message):
         # An address must be one they wrote, at least in part, not one the AI made up.
         "address": address if address and address.split()[0].lower() in message.lower() else None,
     }
+
+
+def read_booking(message, now_uk):
+    """Return (start, end date) for when a job is booked, or None if it's unclear.
+
+    now_uk is the time now in the UK, which Claude needs to work out "next Monday".
+    """
+    today = f"Today is {now_uk:%A} {now_uk:%Y-%m-%d}, and the time is {now_uk:%H:%M}."
+    draft = safely_ask_claude(message, BOOKING_INSTRUCTIONS.format(today=today), BookingDraft)
+    if draft is None:
+        return None
+    day = diary.parse_iso_date(draft.date)
+    if day is None:
+        return None
+    # Claude reads the words, but the code checks the dates make sense.
+    return diary.check_booking(
+        day, diary.parse_iso_time(draft.time), diary.parse_iso_date(draft.end_date), now_uk.date()
+    )

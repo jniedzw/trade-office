@@ -8,8 +8,10 @@ from twilio.twiml.messaging_response import MessagingResponse
 from twilio.twiml.voice_response import VoiceResponse
 
 import settings
-from ai import change_quote, read_job, read_quote
+from ai import change_quote, read_booking, read_job, read_quote
 from database import (
+    book_job,
+    booked_jobs,
     mark_paid,
     unpaid_invoices,
     get_job,
@@ -49,6 +51,7 @@ from database import (
     set_whatsapp_alerts,
     whatsapp_alerts_on,
 )
+from diary import uk_now, week_ahead, when
 from menu import HELP_TEXT, MENU_TEXT, command_for_title
 from pdfs import make_invoice_pdf, make_quote_pdf
 from quotes import (
@@ -384,9 +387,9 @@ def is_new_command(command):
     to 1300"), so only messages that can't be an answer count as commands.
     """
     words = command.split()
-    if command in ("ALERTS ON", "ALERTS OFF", "PRICES", "HELP", "OWED", "PAID"):
+    if command in ("ALERTS ON", "ALERTS OFF", "PRICES", "HELP", "OWED", "PAID", "WEEK"):
         return True
-    if words[:1] in (["QUOTE"], ["LOG"]):
+    if words[:1] in (["QUOTE"], ["LOG"], ["BOOK"]):
         return True
     # FINAL 6, INVOICE 6 and CHANGE 6 need a quote number straight after.
     return words[:1] in (["FINAL"], ["INVOICE"], ["CHANGE"], ["PAID"]) and words[1:2] != [] and words[1].isdigit()
@@ -474,6 +477,10 @@ def answer_question(client, question, answer):
         return quote_from_job(client, quote_id, answer)
     if asked == "mark_paid":
         return paid_reply(client, answer)
+    if asked == "book_job":
+        return book_from_answer(client, quote_id, answer)
+    if asked == "new_booking":
+        return book_reply(client, answer)
     return Reply("Sorry, I lost track of that. Please start again.")
 
 
@@ -481,6 +488,15 @@ LOG_HELP = (
     "To log a job, send LOG and the job in your own words, like:\n"
     "LOG Mrs Jones, 12 Elm Road, 07700 900123, leaking radiator in the kitchen"
 )
+
+
+def too_many_jobs(client):
+    """Return True, and tell James, if the client has hit the daily job limit."""
+    # The same cap as quotes, since reading a job uses the AI too.
+    if count_jobs_today(client.id) >= MAX_QUOTES_PER_DAY:
+        alert_james(client, "hit the daily job limit.")
+        return True
+    return False
 
 
 def log_reply(client, details):
@@ -491,11 +507,8 @@ def log_reply(client, details):
     if details.strip() == "":
         ask_question(client.id, "new_job", 0)
         return Reply("Tell me about the job: who it's for, their address and number if you have them, and the work.")
-    # The same cap as quotes, since reading a job uses the AI too.
-    if count_jobs_today(client.id) >= MAX_QUOTES_PER_DAY:
-        alert_james(client, "hit the daily job limit.")
+    if too_many_jobs(client):
         return Reply(f"That's {MAX_QUOTES_PER_DAY} jobs today, the daily limit. Try again tomorrow.")
-
     job = parse_job(details) or read_job(details)
     if job is None:
         return Reply(LOG_HELP)
@@ -546,6 +559,50 @@ def paid_reply(client, details):
     return Reply(f"Invoice {number} marked as paid.")
 
 
+BOOK_HELP = "To book a job, send BOOK, the job and when, like:\nBOOK Mrs Jones, leaking radiator, Monday 9am"
+
+
+def book_reply(client, details):
+    """Book a logged job in ("BOOK JOB 4"), or log and book a new one in one go."""
+    words = details.split()
+    if len(words) == 2 and words[0].upper() == "JOB" and words[1].isdigit():
+        job = get_job(int(words[1]))
+        if job is None or job.client_id != client.id:
+            return Reply(f"There's no job {words[1]} for {client.business_name}.")
+        ask_question(client.id, "book_job", job.id)
+        return Reply(f"When's {job.customer_name}'s job? Like: Monday 9am, or Mon to Fri for a longer job.")
+    if details.strip() == "":
+        ask_question(client.id, "new_booking", 0)
+        return Reply("Tell me the job and when: who it's for, the work, and the day and time.")
+
+    # A new job and its time in one message, like "Mrs Jones, leaking rad, Monday 9am".
+    if too_many_jobs(client):
+        return Reply(f"That's {MAX_QUOTES_PER_DAY} jobs today, the daily limit. Try again tomorrow.")
+    job = read_job(details)
+    if job is None:
+        return Reply(BOOK_HELP)
+    return book_from_answer(client, save_job(client.id, **job), details)
+
+
+def book_from_answer(client, job_id, answer):
+    """Book a job for the time in the tradesperson's answer, or ask again if it's unclear."""
+    job = get_job(job_id)
+    booking = read_booking(answer, uk_now(now_utc()))
+    if booking is None:
+        ask_question(client.id, "book_job", job.id)
+        return Reply(f"When's {job.customer_name}'s job? I couldn't tell from that. Like: Monday 9am.")
+    starts_at, ends_on = booking
+    book_job(job.id, starts_at, ends_on)
+    return Reply(f"Booked: {job.customer_name}, {job.work}, {when(starts_at, ends_on)}.")
+
+
+def week_reply(client):
+    """Return the client's booked jobs for the next 7 days."""
+    today = uk_now(now_utc()).date()
+    week = week_ahead(booked_jobs(client.id, now_utc()), today)
+    return Reply(f"Your week:\n{week}" if week else "Nothing booked for the next 7 days.")
+
+
 def alerts_reply(client, details):
     """Turn WhatsApp alerts on or off."""
     if details.strip().upper() == "ON":
@@ -570,6 +627,8 @@ COMMANDS = {
     "ALERTS": lambda client, rest: alerts_reply(client, rest),
     "PAID": lambda client, rest: paid_reply(client, rest),
     "OWED": lambda client, rest: owed_reply(client),
+    "BOOK": lambda client, rest: book_reply(client, rest),
+    "WEEK": lambda client, rest: week_reply(client),
 }
 
 

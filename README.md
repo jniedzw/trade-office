@@ -45,7 +45,7 @@ sequenceDiagram
 | GET | `/` | Health check |
 | POST | `/voice` | Twilio webhook for incoming calls |
 | POST | `/sms` | Twilio webhook for incoming texts: forwards customers' replies to the tradesperson |
-| POST | `/whatsapp` | Twilio webhook for incoming WhatsApp messages: recognises tradespeople by their mobile number, and handles a menu, `LOG` to save a job, `OWED` and `PAID` for money owed, `ALERTS ON`, `ALERTS OFF`, `QUOTE` to save a draft quote and reply with its PDF, `CHANGE` to edit a draft in plain words, `FINAL` to finish one, `INVOICE` to make an invoice from it, and `PRICE` / `PRICES` to manage standard prices |
+| POST | `/whatsapp` | Twilio webhook for incoming WhatsApp messages: recognises tradespeople by their mobile number, and handles a menu, `LOG` to save a job, `OWED` and `PAID` for money owed, `BOOK` and `WEEK` for the diary, `ALERTS ON`, `ALERTS OFF`, `QUOTE` to save a draft quote and reply with its PDF, `CHANGE` to edit a draft in plain words, `FINAL` to finish one, `INVOICE` to make an invoice from it, and `PRICE` / `PRICES` to manage standard prices |
 | GET | `/quotes/{id}.pdf` | Downloads a quote's PDF; only works with a signed link that expires after 7 days |
 | GET | `/invoices/{id}.pdf` | Downloads an invoice's PDF, signed the same way |
 | POST | `/whatsapp-status` | Twilio delivery updates: sends a WhatsApp alert by SMS instead if it fails |
@@ -60,6 +60,7 @@ backend/
   quotes.py        # read typed quotes, money and dates, signed download links
   pdfs.py          # make quote PDFs in the client's colours
   menu.py          # the WhatsApp Options menu and help text
+  diary.py         # bookings in UK time and the week ahead
   ai.py            # read rough quote messages with Claude
   eval_quotes.py   # check the AI against 20 made-up messages (costs a few pence)
   settings.py      # app-wide settings read from .env
