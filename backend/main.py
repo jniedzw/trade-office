@@ -227,17 +227,49 @@ class Reply(NamedTuple):
 
     text: str
     link: str | None = None
-    # A button template's ID and the quote number its buttons act on.
-    buttons: tuple[str, int] | None = None
+    # A button template's ID, and what fills its gaps besides the words in {{1}}.
+    buttons: tuple[str, dict] | None = None
 
 
 def buttons_for(template, quote_id):
     """Return buttons for a quote, or None if that template isn't set up."""
-    return (template, quote_id) if template else None
+    return (template, {"2": str(quote_id)}) if template else None
+
+
+# What Jack says to anything he doesn't recognise, like "morning".
+MENU_TEXT = "Hi, it's Jack. What do you need? Tap Options."
+
+# The menu's choices. A tap may arrive as just the choice's title, so map those to commands.
+MENU_TITLES = {"NEW QUOTE": "QUOTE", "MY PRICES": "PRICES", "HELP": "HELP"}
+
+HELP_TEXT = (
+    "Things you can send me:\n"
+    "QUOTE and the job, in your own words\n"
+    "CHANGE 6 and what to change\n"
+    "FINAL 6 to finish quote 6\n"
+    "INVOICE 6 to invoice it\n"
+    "PRICE boiler service 85 to save a price\n"
+    "PRICES to see your prices\n"
+    "Or just say hi for the menu."
+)
+
+
+def menu_reply(client):
+    """Return the menu, or plain help if the menu template isn't set up."""
+    if not settings.WHATSAPP_MENU:
+        return Reply(HELP_TEXT)
+    return Reply(MENU_TEXT, None, (settings.WHATSAPP_MENU, {}))
 
 
 def quote_reply(client, details):
-    """Save a draft quote and return our reply and a link to its PDF (or None)."""
+    """Save a draft quote and return our reply and a link to its PDF (or None).
+
+    With no details, as when the tradesperson taps New quote, Jack asks about the job.
+    """
+    if details.strip() == "":
+        # 0 because there's no quote yet for the question to be about.
+        ask_question(client.id, "new_quote", 0)
+        return Reply("Tell me about the job: who it's for, the work, and the price.")
     # A cap, so a fault or misuse can't run up a big AI bill.
     if count_quotes_today(client.id) >= MAX_QUOTES_PER_DAY:
         alert_james(client, "hit the daily quote limit.")
@@ -327,7 +359,7 @@ def is_new_command(command):
     to 1300"), so only messages that can't be an answer count as commands.
     """
     words = command.split()
-    if command in ("ALERTS ON", "ALERTS OFF", "PRICES") or words[:1] == ["QUOTE"]:
+    if command in ("ALERTS ON", "ALERTS OFF", "PRICES", "HELP") or words[:1] == ["QUOTE"]:
         return True
     # FINAL 6, INVOICE 6 and CHANGE 6 need a quote number straight after.
     return words[:1] in (["FINAL"], ["INVOICE"], ["CHANGE"]) and words[1:2] != [] and words[1].isdigit()
@@ -407,6 +439,8 @@ def answer_question(client, question, answer):
         return invoice_reply(client, f"{quote_id}\n{answer}")
     if asked == "change":
         return change_reply(client, f"{quote_id} {answer}")
+    if asked == "new_quote":
+        return quote_reply(client, answer)
     return Reply("Sorry, I lost track of that. Please start again.")
 
 
@@ -418,12 +452,17 @@ def whatsapp_reply(sender, body=""):
         return Reply(WHATSAPP_NOT_A_CLIENT)
 
     command = body.strip().upper()
+    if command in MENU_TITLES:
+        # Use the menu choice's command in place of its title, like "New quote".
+        body = command = MENU_TITLES[command]
     first_word = command.split()[:1]
     # Jack's question only gets an answer if this isn't a new command.
     question = pop_question(client.id)
     if question is not None and not is_new_command(command):
         return answer_question(client, question, body)
 
+    if command == "HELP":
+        return Reply(HELP_TEXT)
     if command == "ALERTS ON":
         set_whatsapp_alerts(client.id, True)
         return Reply("Done. Missed-call alerts will come here. Send ALERTS OFF for texts.")
@@ -443,7 +482,7 @@ def whatsapp_reply(sender, body=""):
         return change_reply(client, body.strip()[len("CHANGE"):])
     if command.split()[:1] == ["FINAL"]:
         return final_reply(client, command.removeprefix("FINAL").strip())
-    return Reply(f"Hi, it's Jack. {client.business_name} is connected to WhatsApp.")
+    return menu_reply(client)
 
 
 def forward_message(sender, body):
@@ -532,7 +571,11 @@ async def incoming_sms(
 
 @app.post("/whatsapp")
 async def incoming_whatsapp(
-    request: Request, From: str = Form(), Body: str = Form(""), ButtonPayload: str = Form("")
+    request: Request,
+    From: str = Form(),
+    Body: str = Form(""),
+    ButtonPayload: str = Form(""),
+    ListId: str = Form(""),
 ):
     # Twilio calls this when someone messages our WhatsApp number.
     await check_twilio_signature(request)
@@ -540,7 +583,8 @@ async def incoming_whatsapp(
     # A tapped button sends its title as Body, and the ID we gave it as ButtonPayload.
     # We make each ID a command, like "FINAL 6", so buttons and typing work the same.
     # Replying in the response sends it straight back through WhatsApp.
-    reply = whatsapp_reply(From, ButtonPayload or Body)
+    # A choice from a list menu arrives the same way, with its ID in ListId.
+    reply = whatsapp_reply(From, ButtonPayload or ListId or Body)
     twiml = MessagingResponse()
     if reply.buttons:
         reply = send_with_buttons(From, reply)
@@ -562,13 +606,13 @@ def send_with_buttons(to, reply):
     """
     # Buttons can't go in a TwiML reply, so both are sent through Twilio's API,
     # the PDF first so the buttons arrive underneath it.
-    template, quote_id = reply.buttons
+    template, gaps = reply.buttons
     pdf_sent = False
     try:
         if reply.link:
             send_whatsapp(to, media_url=reply.link)
             pdf_sent = True
-        send_whatsapp_buttons(to, template, {"1": reply.text, "2": str(quote_id)})
+        send_whatsapp_buttons(to, template, {"1": reply.text, **gaps})
         return None
     except Exception as error:
         # A plain reply is better than none, but don't send the PDF twice.

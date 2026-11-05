@@ -26,3 +26,5 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 # Optional: button templates from create_button_templates.py. Replies have no buttons without them.
 WHATSAPP_DRAFT_BUTTONS = os.environ.get("WHATSAPP_DRAFT_BUTTONS")
 WHATSAPP_FINAL_BUTTONS = os.environ.get("WHATSAPP_FINAL_BUTTONS")
+# Optional: the Options menu template. Without it, "hi" gets plain help instead.
+WHATSAPP_MENU = os.environ.get("WHATSAPP_MENU")

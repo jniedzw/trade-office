@@ -48,6 +48,7 @@ def use_fakes(monkeypatch, tmp_path, active=True, failing=()):
     monkeypatch.setattr(main, "change_quote", lambda quote, lines, change: None)
     monkeypatch.setattr(settings, "WHATSAPP_DRAFT_BUTTONS", None)
     monkeypatch.setattr(settings, "WHATSAPP_FINAL_BUTTONS", None)
+    monkeypatch.setattr(settings, "WHATSAPP_MENU", None)
     # The cleanup job must never reach the real Twilio account from a test.
     monkeypatch.setattr(main, "count_old_twilio_records", lambda cutoff: (0, 0))
 
@@ -528,11 +529,13 @@ def test_owner_alert_for_a_repeat_caller():
     )
 
 
-def signed_whatsapp(sender, body="Hi", button=None):
+def signed_whatsapp(sender, body="Hi", button=None, list_id=None):
     """Send /whatsapp a fake message, signed the same way Twilio signs real ones."""
     form = {"From": f"whatsapp:{sender}", "To": f"whatsapp:{OUR_NUMBER}", "Body": body}
     if button:
         form["ButtonPayload"] = button
+    if list_id:
+        form["ListId"] = list_id
     validator = RequestValidator(settings.TWILIO_AUTH_TOKEN)
     signature = validator.compute_signature(settings.PUBLIC_URL + "/whatsapp", form)
     return client.post(
@@ -547,7 +550,7 @@ def test_whatsapp_recognises_a_client(monkeypatch, tmp_path):
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/xml"
-    assert "Test Plumbing is connected" in response.text
+    assert "Things you can send me" in response.text
     assert texted_numbers == []  # the reply goes back in the response, not by SMS
 
 
@@ -1117,7 +1120,7 @@ def use_buttons(monkeypatch, failing=False):
     def fake_send_whatsapp_buttons(to, template, variables):
         if failing:
             raise RuntimeError("Twilio is unhappy")
-        sent.append((template, variables["2"]))
+        sent.append((template, variables.get("2")))
 
     monkeypatch.setattr(main, "send_whatsapp", fake_send_whatsapp)
     monkeypatch.setattr(main, "send_whatsapp_buttons", fake_send_whatsapp_buttons)
@@ -1308,3 +1311,44 @@ def test_is_new_command():
     assert main.is_new_command("PRICE IS 1300") is False
     assert main.is_new_command("FINAL PRICE 1300") is False
     assert main.is_new_command("12 ELM ROAD") is False
+
+
+def test_hi_gets_the_menu(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    sent = use_buttons(monkeypatch)
+    monkeypatch.setattr(settings, "WHATSAPP_MENU", "HX_MENU")
+
+    response = signed_whatsapp(OWNER, "Morning")
+
+    assert sent == [("HX_MENU", None)]
+    assert "<Message>" not in response.text
+
+
+def test_without_the_menu_template_hi_gets_help(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "hello")
+
+    assert text == main.HELP_TEXT
+
+
+def test_new_quote_from_the_menu_asks_about_the_job(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    # The list menu's choice, by its ID or just its title.
+    for tapped in ["QUOTE", "New quote"]:
+        text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", tapped)
+        assert text.startswith("Tell me about the job")
+
+    text, link, buttons = main.whatsapp_reply(
+        f"whatsapp:{OWNER}", "Mrs Jones | Bathroom refit | BR | 1250"
+    )
+    assert text.startswith("Draft quote 1 saved")
+
+
+def test_a_list_choice_arrives_as_list_id(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    # The ID is the command, whatever the title says.
+    response = signed_whatsapp(OWNER, body="Something else", list_id="PRICES")
+    assert "haven't saved any prices" in response.text

@@ -1,4 +1,5 @@
-from create_button_templates import TEMPLATES, template
+import main
+from create_button_templates import MENU, TEMPLATES, template
 
 
 def test_buttons_fit_whatsapps_limits():
@@ -14,3 +15,10 @@ def test_template_uses_the_reply_as_its_body():
     assert made["friendly_name"] == "whatsapp_draft_buttons"
     assert made["types"]["twilio/quick-reply"]["body"] == "{{1}}"
     assert made["types"]["twilio/quick-reply"]["actions"][0]["id"] == "FINAL {{2}}"
+
+
+def test_menu_choices_are_commands_jack_knows():
+    for choice in MENU["items"]:
+        # WhatsApp list items must be short, and each id must be a command.
+        assert len(choice["item"]) <= 24
+        assert main.is_new_command(choice["id"])

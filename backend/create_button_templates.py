@@ -27,6 +27,28 @@ TEMPLATES = {
 }
 
 
+# The Options menu: a button that opens a list. Each item's id is a command too.
+MENU = {
+    "body": "{{1}}",
+    "button": "Options",
+    "items": [
+        {"item": "New quote", "id": "QUOTE", "description": "Tell Jack about a job"},
+        {"item": "My prices", "id": "PRICES", "description": "See your saved prices"},
+        {"item": "Help", "id": "HELP", "description": "Everything you can send"},
+    ],
+}
+
+
+def menu_template():
+    """Return what the Content API needs to create the Options menu."""
+    return {
+        "friendly_name": "whatsapp_menu",
+        "language": "en",
+        "variables": {"1": "Hi, it's Jack. What do you need?"},
+        "types": {"twilio/list-picker": MENU},
+    }
+
+
 def template(name, buttons):
     """Return what the Content API needs to create one quick reply template."""
     return {
@@ -40,11 +62,11 @@ def template(name, buttons):
 
 def main():
     # Name templates to make just those, like: python create_button_templates.py WHATSAPP_DRAFT_BUTTONS
-    names = sys.argv[1:] or list(TEMPLATES)
+    names = sys.argv[1:] or [*TEMPLATES, "WHATSAPP_MENU"]
     auth = (settings.TWILIO_API_KEY_SID, settings.TWILIO_API_KEY_SECRET)
     for name in names:
-        buttons = TEMPLATES[name]
-        response = requests.post(CONTENT_API, json=template(name, buttons), auth=auth, timeout=30)
+        made = menu_template() if name == "WHATSAPP_MENU" else template(name, TEMPLATES[name])
+        response = requests.post(CONTENT_API, json=made, auth=auth, timeout=30)
         response.raise_for_status()
         print(f"{name}={response.json()['sid']}")
 
