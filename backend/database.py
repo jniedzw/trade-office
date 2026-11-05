@@ -94,9 +94,11 @@ class Quote(SQLModel, table=True):
     job_code: str
     # Whole pence, because floats can't hold amounts like 0.1 exactly.
     total_pence: int
-    # draft, then sent, then approved.
+    # draft, then final.
     status: str = "draft"
     time: datetime = Field(default_factory=now_utc)
+    # The job it was quoted from, or None for a quote made straight away.
+    job_id: int | None = None
 
 
 class QuoteLine(SQLModel, table=True):
@@ -186,6 +188,7 @@ class PendingQuestion(SQLModel, table=True):
 NEW_COLUMNS = [
     ("businessdetails", "brand_colour", "VARCHAR NOT NULL DEFAULT '#b8975a'"),
     ("businessdetails", "contact", "VARCHAR NOT NULL DEFAULT ''"),
+    ("quote", "job_id", "INTEGER"),
 ]
 
 
@@ -279,14 +282,18 @@ def get_client(client_id):
         return session.get(Client, client_id)
 
 
-def save_quote(client_id, customer_name, title, job_code, total_pence, lines=()):
-    """Save a new draft quote and its scope of works, and return its ID."""
+def save_quote(client_id, customer_name, title, job_code, total_pence, lines=(), job_id=None):
+    """Save a new draft quote and its scope of works, and return its ID.
+
+    With a job_id, the job is marked as quoted in the same commit.
+    """
     quote = Quote(
         client_id=client_id,
         customer_name=customer_name,
         title=title,
         job_code=job_code,
         total_pence=total_pence,
+        job_id=job_id,
     )
     with Session(engine) as session:
         session.add(quote)
@@ -295,6 +302,10 @@ def save_quote(client_id, customer_name, title, job_code, total_pence, lines=())
         session.flush()
         for position, text in enumerate(lines):
             session.add(QuoteLine(quote_id=quote.id, position=position, text=text))
+        if job_id is not None:
+            job = session.get(Job, job_id)
+            job.status = "quoted"
+            session.add(job)
         session.commit()
         return quote.id
 

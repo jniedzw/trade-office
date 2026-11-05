@@ -10,6 +10,7 @@ from twilio.twiml.voice_response import VoiceResponse
 import settings
 from ai import change_quote, read_job, read_quote
 from database import (
+    get_job,
     count_jobs_today,
     save_job,
     delete_price,
@@ -235,9 +236,9 @@ class Reply(NamedTuple):
     buttons: tuple[str, dict] | None = None
 
 
-def buttons_for(template, quote_id):
-    """Return buttons for a quote, or None if that template isn't set up."""
-    return (template, {"2": str(quote_id)}) if template else None
+def buttons_for(template, number):
+    """Return buttons for a quote or job, or None if that template isn't set up."""
+    return (template, {"2": str(number)}) if template else None
 
 
 def menu_reply(client):
@@ -256,6 +257,10 @@ def quote_reply(client, details):
         # 0 because there's no quote yet for the question to be about.
         ask_question(client.id, "new_quote", 0)
         return Reply("Tell me about the job: who it's for, the work, and the price.")
+    # "QUOTE JOB 4", as sent by the Quote it button under a logged job.
+    words = details.split()
+    if len(words) == 2 and words[0].upper() == "JOB" and words[1].isdigit():
+        return quote_job_reply(client, int(words[1]))
     # A cap, so a fault or misuse can't run up a big AI bill.
     if count_quotes_today(client.id) >= MAX_QUOTES_PER_DAY:
         alert_james(client, "hit the daily quote limit.")
@@ -264,7 +269,35 @@ def quote_reply(client, details):
     quote = parse_quote(details) or read_quote(details)
     if quote is None:
         return Reply(QUOTE_HELP)
-    quote_id = save_quote(client.id, **quote)
+    return draft_reply(save_quote(client.id, **quote), quote)
+
+
+def quote_job_reply(client, job_id):
+    """Ask for the price and work for a logged job, so it can be quoted."""
+    job = get_job(job_id)
+    if job is None or job.client_id != client.id:
+        return Reply(f"There's no job {job_id} for {client.business_name}.")
+    ask_question(client.id, "quote_job", job.id)
+    return Reply(f"What's the price for {job.customer_name}'s job ({job.work}), and the work to list?")
+
+
+def quote_from_job(client, job_id, answer):
+    """Make a draft quote for a logged job from the tradesperson's answer, and return a Reply."""
+    if count_quotes_today(client.id) >= MAX_QUOTES_PER_DAY:
+        return Reply(f"That's {MAX_QUOTES_PER_DAY} quotes today, the daily limit. Try again tomorrow.")
+    job = get_job(job_id)
+    # Start with the job's details, so the tradesperson only has to add the price and the work.
+    # Only his answer counts for the price, not numbers in the job like "3 radiators".
+    quote = read_quote(f"For {job.customer_name}: {job.work}. {answer}", typed=answer)
+    if quote is None:
+        return Reply("Sorry, I couldn't make that quote. Make sure it has a price, like: 450, fit new radiator")
+    # The customer is the job's customer, whatever the AI read.
+    quote["customer_name"] = job.customer_name
+    return draft_reply(save_quote(client.id, **quote, job_id=job.id), quote)
+
+
+def draft_reply(quote_id, quote):
+    """Return the reply for a newly saved draft quote, with its PDF and buttons."""
     count = len(quote["lines"])
     lines = "1 line" if count == 1 else f"{count} lines"
     text = (
@@ -321,6 +354,10 @@ def invoice_reply(client, details):
     if get_business_details(client.id) is None:
         alert_james(client, "tried to invoice without business details.")
         return Reply("Your invoice details aren't set up yet. We've been told and will sort it.")
+    # A quote from a logged job already knows the address, so Jack needn't ask.
+    job = get_job(quote.job_id) if quote.job_id else None
+    if address == "" and job is not None and job.address:
+        address = job.address
     if address == "" and get_invoice_for_quote(quote.id) is None:
         ask_question(client.id, "invoice_address", quote.id)
         return Reply(
@@ -429,6 +466,8 @@ def answer_question(client, question, answer):
         return quote_reply(client, answer)
     if asked == "new_job":
         return log_reply(client, answer)
+    if asked == "quote_job":
+        return quote_from_job(client, quote_id, answer)
     return Reply("Sorry, I lost track of that. Please start again.")
 
 
@@ -460,7 +499,7 @@ def log_reply(client, details):
         lines.append("Address: " + job["address"].replace("\n", ", "))
     if job.get("customer_phone"):
         lines.append(f"Phone: {job['customer_phone']}")
-    return Reply("\n".join(lines))
+    return Reply("\n".join(lines), None, buttons_for(settings.WHATSAPP_JOB_BUTTONS, job_id))
 
 
 def alerts_reply(client, details):

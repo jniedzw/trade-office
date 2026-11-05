@@ -104,10 +104,13 @@ def safely_ask_claude(message, system=INSTRUCTIONS, shape=None):
         return None
 
 
-def read_quote(message):
-    """Turn a rough message into the same dict parse_quote makes, or None."""
+def read_quote(message, typed=None):
+    """Turn a rough message into the same dict parse_quote makes, or None.
+
+    typed is the part the tradesperson wrote, if message has more added to it.
+    """
     # The price must be one the tradesperson actually wrote, so the AI can't invent one.
-    return tidy(safely_ask_claude(message), prices_in(message))
+    return tidy(safely_ask_claude(message), prices_in(typed or message))
 
 
 def change_quote(quote, lines, change):

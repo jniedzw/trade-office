@@ -25,6 +25,10 @@ TEMPLATES = {
     "WHATSAPP_FINAL_BUTTONS": [
         {"title": "Make invoice", "id": "INVOICE {{2}}"},
     ],
+    # Under a logged job, where {{2}} is the job number.
+    "WHATSAPP_JOB_BUTTONS": [
+        {"title": "Quote it", "id": "QUOTE JOB {{2}}"},
+    ],
 }
 
 

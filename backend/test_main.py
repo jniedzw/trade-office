@@ -45,12 +45,13 @@ def use_fakes(monkeypatch, tmp_path, active=True, failing=()):
     # Off unless a test turns it on, whatever the real .env says.
     monkeypatch.setattr(settings, "QUOTE_LINK_SECRET", None)
     # Tests must never reach the real AI, which costs money.
-    monkeypatch.setattr(main, "read_quote", lambda details: None)
+    monkeypatch.setattr(main, "read_quote", lambda details, typed=None: None)
     monkeypatch.setattr(main, "read_job", lambda details: None)
     monkeypatch.setattr(main, "change_quote", lambda quote, lines, change: None)
     monkeypatch.setattr(settings, "WHATSAPP_DRAFT_BUTTONS", None)
     monkeypatch.setattr(settings, "WHATSAPP_FINAL_BUTTONS", None)
     monkeypatch.setattr(settings, "WHATSAPP_MENU", None)
+    monkeypatch.setattr(settings, "WHATSAPP_JOB_BUTTONS", None)
     # The cleanup job must never reach the real Twilio account from a test.
     monkeypatch.setattr(main, "count_old_twilio_records", lambda cutoff: (0, 0))
 
@@ -1407,3 +1408,74 @@ def test_alerts_needs_on_or_off(monkeypatch, tmp_path):
     text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "ALERTS please")
 
     assert text.startswith("Send ALERTS ON")
+
+
+def log_test_job(address="12 Test Road\nLiverpool"):
+    """Save job 1 for the test client, the way LOG would."""
+    return database.save_job(1, "Mrs Jones", "Leaking radiator", address=address)
+
+
+def test_quote_it_turns_a_job_into_a_quote(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+    log_test_job()
+    seen = []
+
+    def fake_read_quote(details, typed=None):
+        seen.append(typed)
+        return {"customer_name": "Someone else", "title": "Radiator", "job_code": "RAD",
+                "total_pence": 45000, "lines": ["Fit new radiator"]}
+
+    monkeypatch.setattr(main, "read_quote", fake_read_quote)
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "QUOTE JOB 1")
+    assert text.startswith("What's the price for Mrs Jones's job")
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "450, fit new radiator")
+    # Quote 2, because use_quote_links already saved quote 1.
+    assert text.startswith("Draft quote 2 saved: Radiator for Mrs Jones, £450.00")
+    # Only the tradesperson's answer is used for the price check.
+    assert seen == ["450, fit new radiator"]
+    assert database.get_quote(2).job_id == 1
+    assert database.get_job(1).status == "quoted"
+
+
+def test_invoicing_a_job_quote_uses_the_jobs_address(monkeypatch, tmp_path):
+    use_final_quote(monkeypatch, tmp_path)
+    log_test_job()
+    quote_id = database.save_quote(1, "Mrs Jones", "Radiator", "RAD", 45000, job_id=1)
+    database.finish_quote(1, quote_id)
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", f"INVOICE {quote_id}")
+
+    assert text.startswith("Invoice 1 saved for Mrs Jones")
+    assert database.get_invoice_for_quote(quote_id).customer_address == "12 Test Road\nLiverpool"
+
+
+def test_a_client_cant_quote_another_clients_job(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    log_test_job()
+    other_owner = "+447700900790"
+    with Session(database.engine) as session:
+        session.add(
+            Client(
+                business_name="Other Plumbing",
+                owner_mobile=other_owner,
+                twilio_number="+447700900457",
+                text_back_message="Hi",
+            )
+        )
+        session.commit()
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{other_owner}", "QUOTE JOB 1")
+
+    assert text == "There's no job 1 for Other Plumbing."
+
+
+def test_a_logged_job_gets_a_quote_it_button(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    sent = use_buttons(monkeypatch)
+    monkeypatch.setattr(settings, "WHATSAPP_JOB_BUTTONS", "HX_JOB")
+
+    signed_whatsapp(OWNER, "LOG Mrs Jones | Leaking radiator")
+
+    assert sent == [("HX_JOB", "1")]

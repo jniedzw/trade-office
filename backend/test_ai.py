@@ -152,3 +152,10 @@ def test_read_job_drops_a_made_up_address(monkeypatch):
         "customer_phone": None,
         "address": None,
     }
+
+
+def test_read_quote_checks_the_price_against_only_what_was_typed(monkeypatch):
+    use_fake_claude(monkeypatch, good_draft(price="3"))
+
+    # "3" is in the job's description, but not in what the tradesperson typed.
+    assert read_quote("For Mrs Jones: 3 radiators. 1,250 all in", typed="1,250 all in") is None
