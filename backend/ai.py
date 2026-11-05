@@ -35,6 +35,24 @@ Answer with the whole quote after the change, in the same fields:
 - lines: the full list of work after the change, in order."""
 
 
+JOB_INSTRUCTIONS = """You read WhatsApp messages from a UK tradesperson logging a new job.
+Pick out:
+- customer_name: who the job is for, as they wrote it. Empty string if there isn't one.
+- customer_phone: the customer's phone number exactly as written, or null.
+- address: the job's address as written, with each part on a new line, or null.
+- work: a short description of the work, like "Leaking radiator in the kitchen".
+Never make up a phone number or address: use null if they didn't write one."""
+
+
+class JobDraft(BaseModel):
+    """The shape Claude must answer in when reading a new job."""
+
+    customer_name: str
+    customer_phone: str | None
+    address: str | None
+    work: str
+
+
 class QuoteDraft(BaseModel):
     """The shape Claude must answer in."""
 
@@ -52,15 +70,18 @@ def prices_in(message):
     return {to_pence(amount) for amount in amounts} - {None}
 
 
-def ask_claude(message, system=INSTRUCTIONS):
-    """Send the message to Claude and return a QuoteDraft, or None."""
+def ask_claude(message, system=INSTRUCTIONS, shape=None):
+    """Send the message to Claude and return its answer in shape, or None.
+
+    shape is the Pydantic class to answer in: a QuoteDraft unless we say otherwise.
+    """
     client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY, timeout=30)
     response = client.beta.messages.parse(
         model=AI_MODEL,
         max_tokens=2000,
         system=system,
         messages=[{"role": "user", "content": message}],
-        output_format=QuoteDraft,
+        output_format=shape or QuoteDraft,
         # Picking out details is simple work, so Claude needn't think hard.
         output_config={"effort": "low"},
         # If Claude declines, another model tries instead of us getting nothing.
@@ -71,12 +92,12 @@ def ask_claude(message, system=INSTRUCTIONS):
     return response.parsed_output
 
 
-def safely_ask_claude(message, system=INSTRUCTIONS):
-    """Return Claude's QuoteDraft, or None if there's no key or the AI failed."""
+def safely_ask_claude(message, system=INSTRUCTIONS, shape=None):
+    """Return Claude's answer, or None if there's no key or the AI failed."""
     if not settings.ANTHROPIC_API_KEY:
         return None
     try:
-        return ask_claude(message, system)
+        return ask_claude(message, system, shape)
     except anthropic.APIError as error:
         # Only the error's type: the message could include the customer's details.
         print(f"AI quote failed: {type(error).__name__}", flush=True)
@@ -122,4 +143,32 @@ def tidy(draft, allowed_prices):
         "job_code": job_code,
         "total_pence": total_pence,
         "lines": [line.strip() for line in draft.lines if line.strip()],
+    }
+
+
+def uk_mobile(number, message):
+    """Return number as +447..., or None if it isn't a UK mobile written in message."""
+    digits = "".join(c for c in number if c.isdigit())
+    # The digits must be in what they typed, so the AI can't make a number up.
+    if digits == "" or digits not in "".join(c for c in message if c.isdigit()):
+        return None
+    if digits.startswith("07") and len(digits) == 11:
+        return "+44" + digits[1:]
+    if digits.startswith("447") and len(digits) == 12:
+        return "+" + digits
+    return None
+
+
+def read_job(message):
+    """Turn a rough message about a new job into a dict for save_job, or None."""
+    draft = safely_ask_claude(message, JOB_INSTRUCTIONS, JobDraft)
+    if draft is None or draft.customer_name.strip() == "" or draft.work.strip() == "":
+        return None
+    address = (draft.address or "").strip()
+    return {
+        "customer_name": draft.customer_name.strip(),
+        "work": draft.work.strip(),
+        "customer_phone": uk_mobile(draft.customer_phone or "", message),
+        # An address must be one they wrote, at least in part, not one the AI made up.
+        "address": address if address and address.split()[0].lower() in message.lower() else None,
     }

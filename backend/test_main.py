@@ -7,6 +7,7 @@ from twilio.request_validator import RequestValidator
 
 import database
 import main
+import menu
 import quotes
 import settings
 from database import Call, Client
@@ -45,6 +46,7 @@ def use_fakes(monkeypatch, tmp_path, active=True, failing=()):
     monkeypatch.setattr(settings, "QUOTE_LINK_SECRET", None)
     # Tests must never reach the real AI, which costs money.
     monkeypatch.setattr(main, "read_quote", lambda details: None)
+    monkeypatch.setattr(main, "read_job", lambda details: None)
     monkeypatch.setattr(main, "change_quote", lambda quote, lines, change: None)
     monkeypatch.setattr(settings, "WHATSAPP_DRAFT_BUTTONS", None)
     monkeypatch.setattr(settings, "WHATSAPP_FINAL_BUTTONS", None)
@@ -1352,3 +1354,56 @@ def test_a_list_choice_arrives_as_list_id(monkeypatch, tmp_path):
     # The ID is the command, whatever the title says.
     response = signed_whatsapp(OWNER, body="Something else", list_id="PRICES")
     assert "haven't saved any prices" in response.text
+
+
+def test_every_command_is_in_the_menu_or_marked_as_not():
+    # If this fails, a new command needs adding to MENU_CHOICES or NOT_IN_MENU in menu.py.
+    in_menu = {command for _, command, _ in menu.MENU_CHOICES}
+    assert set(main.COMMANDS) == in_menu | set(menu.NOT_IN_MENU)
+
+
+def test_log_a_typed_job(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    text, link, buttons = main.whatsapp_reply(
+        f"whatsapp:{OWNER}", "LOG Mrs Jones | 12 Test Road, Liverpool | Leaking radiator"
+    )
+
+    assert text == "Job 1 logged: Mrs Jones, Leaking radiator.\nAddress: 12 Test Road, Liverpool"
+    job = database.get_job(1)
+    assert job.address == "12 Test Road\nLiverpool"
+    assert job.status == "logged"
+
+
+def test_log_a_job_from_the_menu(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    job = {
+        "customer_name": "Mrs Jones",
+        "work": "Leaking radiator",
+        "customer_phone": "+447700900123",
+        "address": None,
+    }
+    monkeypatch.setattr(main, "read_job", lambda details: job)
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "Log a job")
+    assert text.startswith("Tell me about the job")
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "mrs jones leaking rad 07700 900123")
+    assert text == "Job 1 logged: Mrs Jones, Leaking radiator.\nPhone: +447700900123"
+
+
+def test_a_job_jack_cant_read_gets_help(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "LOG something")
+
+    assert text == main.LOG_HELP
+    assert database.get_job(1) is None
+
+
+def test_alerts_needs_on_or_off(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "ALERTS please")
+
+    assert text.startswith("Send ALERTS ON")

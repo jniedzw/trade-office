@@ -8,8 +8,10 @@ from twilio.twiml.messaging_response import MessagingResponse
 from twilio.twiml.voice_response import VoiceResponse
 
 import settings
-from ai import change_quote, read_quote
+from ai import change_quote, read_job, read_quote
 from database import (
+    count_jobs_today,
+    save_job,
     delete_price,
     get_prices,
     set_price,
@@ -44,11 +46,13 @@ from database import (
     set_whatsapp_alerts,
     whatsapp_alerts_on,
 )
+from menu import HELP_TEXT, MENU_TEXT, command_for_title
 from pdfs import make_invoice_pdf, make_quote_pdf
 from quotes import (
     QUOTE_HELP,
     link_is_valid,
     money,
+    parse_job,
     parse_quote,
     signed_link,
     to_pence,
@@ -236,24 +240,6 @@ def buttons_for(template, quote_id):
     return (template, {"2": str(quote_id)}) if template else None
 
 
-# What Jack says to anything he doesn't recognise, like "morning".
-MENU_TEXT = "Hi, it's Jack. What do you need? Tap Options."
-
-# The menu's choices. A tap may arrive as just the choice's title, so map those to commands.
-MENU_TITLES = {"NEW QUOTE": "QUOTE", "MY PRICES": "PRICES", "HELP": "HELP"}
-
-HELP_TEXT = (
-    "Things you can send me:\n"
-    "QUOTE and the job, in your own words\n"
-    "CHANGE 6 and what to change\n"
-    "FINAL 6 to finish quote 6\n"
-    "INVOICE 6 to invoice it\n"
-    "PRICE boiler service 85 to save a price\n"
-    "PRICES to see your prices\n"
-    "Or just say hi for the menu."
-)
-
-
 def menu_reply(client):
     """Return the menu, or plain help if the menu template isn't set up."""
     if not settings.WHATSAPP_MENU:
@@ -359,7 +345,7 @@ def is_new_command(command):
     to 1300"), so only messages that can't be an answer count as commands.
     """
     words = command.split()
-    if command in ("ALERTS ON", "ALERTS OFF", "PRICES", "HELP") or words[:1] == ["QUOTE"]:
+    if command in ("ALERTS ON", "ALERTS OFF", "PRICES", "HELP") or words[:1] in (["QUOTE"], ["LOG"]):
         return True
     # FINAL 6, INVOICE 6 and CHANGE 6 need a quote number straight after.
     return words[:1] in (["FINAL"], ["INVOICE"], ["CHANGE"]) and words[1:2] != [] and words[1].isdigit()
@@ -441,7 +427,65 @@ def answer_question(client, question, answer):
         return change_reply(client, f"{quote_id} {answer}")
     if asked == "new_quote":
         return quote_reply(client, answer)
+    if asked == "new_job":
+        return log_reply(client, answer)
     return Reply("Sorry, I lost track of that. Please start again.")
+
+
+LOG_HELP = (
+    "To log a job, send LOG and the job in your own words, like:\n"
+    "LOG Mrs Jones, 12 Elm Road, 07700 900123, leaking radiator in the kitchen"
+)
+
+
+def log_reply(client, details):
+    """Save a new job from what the client wrote, and return our Reply.
+
+    With no details, as when the tradesperson taps Log a job, Jack asks about the job.
+    """
+    if details.strip() == "":
+        ask_question(client.id, "new_job", 0)
+        return Reply("Tell me about the job: who it's for, their address and number if you have them, and the work.")
+    # The same cap as quotes, since reading a job uses the AI too.
+    if count_jobs_today(client.id) >= MAX_QUOTES_PER_DAY:
+        alert_james(client, "hit the daily job limit.")
+        return Reply(f"That's {MAX_QUOTES_PER_DAY} jobs today, the daily limit. Try again tomorrow.")
+
+    job = parse_job(details) or read_job(details)
+    if job is None:
+        return Reply(LOG_HELP)
+    job_id = save_job(client.id, **job)
+    lines = [f"Job {job_id} logged: {job['customer_name']}, {job['work']}."]
+    if job.get("address"):
+        lines.append("Address: " + job["address"].replace("\n", ", "))
+    if job.get("customer_phone"):
+        lines.append(f"Phone: {job['customer_phone']}")
+    return Reply("\n".join(lines))
+
+
+def alerts_reply(client, details):
+    """Turn WhatsApp alerts on or off."""
+    if details.strip().upper() == "ON":
+        set_whatsapp_alerts(client.id, True)
+        return Reply("Done. Missed-call alerts will come here. Send ALERTS OFF for texts.")
+    if details.strip().upper() == "OFF":
+        set_whatsapp_alerts(client.id, False)
+        return Reply("Done. Missed-call alerts will come by text.")
+    return Reply("Send ALERTS ON for alerts here, or ALERTS OFF for texts.")
+
+
+# Every command, by its first word. Each handler gets the client and the rest of the message.
+COMMANDS = {
+    "LOG": lambda client, rest: log_reply(client, rest),
+    "QUOTE": lambda client, rest: quote_reply(client, rest),
+    "CHANGE": lambda client, rest: change_reply(client, rest),
+    "FINAL": lambda client, rest: final_reply(client, rest.strip()),
+    "INVOICE": lambda client, rest: invoice_reply(client, rest),
+    "PRICE": lambda client, rest: price_reply(client, rest),
+    "PRICES": lambda client, rest: prices_reply(client),
+    "HELP": lambda client, rest: Reply(HELP_TEXT),
+    "ALERTS": lambda client, rest: alerts_reply(client, rest),
+}
 
 
 def whatsapp_reply(sender, body=""):
@@ -451,37 +495,18 @@ def whatsapp_reply(sender, body=""):
     if client is None or not client.active:
         return Reply(WHATSAPP_NOT_A_CLIENT)
 
-    command = body.strip().upper()
-    if command in MENU_TITLES:
-        # Use the menu choice's command in place of its title, like "New quote".
-        body = command = MENU_TITLES[command]
-    first_word = command.split()[:1]
+    # A menu choice may arrive as its title, like "New quote", so use its command.
+    body = command_for_title(body) or body.strip()
+    command = body.upper()
     # Jack's question only gets an answer if this isn't a new command.
     question = pop_question(client.id)
     if question is not None and not is_new_command(command):
         return answer_question(client, question, body)
 
-    if command == "HELP":
-        return Reply(HELP_TEXT)
-    if command == "ALERTS ON":
-        set_whatsapp_alerts(client.id, True)
-        return Reply("Done. Missed-call alerts will come here. Send ALERTS OFF for texts.")
-    if command == "ALERTS OFF":
-        set_whatsapp_alerts(client.id, False)
-        return Reply("Done. Missed-call alerts will come by text.")
-    # The first word, so "QUOTE" can be followed by a space or a new line.
-    if command.split()[:1] == ["QUOTE"]:
-        return quote_reply(client, body.strip()[len("QUOTE"):])
-    if command.split()[:1] == ["INVOICE"]:
-        return invoice_reply(client, body.strip()[len("INVOICE"):])
-    if first_word == ["PRICES"]:
-        return prices_reply(client)
-    if first_word == ["PRICE"]:
-        return price_reply(client, body.strip()[len("PRICE"):])
-    if command.split()[:1] == ["CHANGE"]:
-        return change_reply(client, body.strip()[len("CHANGE"):])
-    if command.split()[:1] == ["FINAL"]:
-        return final_reply(client, command.removeprefix("FINAL").strip())
+    # The first word picks the command, so it can be followed by a space or a new line.
+    first_word = command.split()[0] if command else ""
+    if first_word in COMMANDS:
+        return COMMANDS[first_word](client, body[len(first_word):])
     return menu_reply(client)
 
 

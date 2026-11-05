@@ -11,6 +11,7 @@ import sys
 import requests
 
 import settings
+from menu import MENU_CHOICES
 
 CONTENT_API = "https://content.twilio.com/v1/Content"
 
@@ -27,14 +28,13 @@ TEMPLATES = {
 }
 
 
-# The Options menu: a button that opens a list. Each item's id is a command too.
+# The Options menu: a button that opens a list, built from menu.py. Each item's id is a command.
 MENU = {
     "body": "{{1}}",
     "button": "Options",
     "items": [
-        {"item": "New quote", "id": "QUOTE", "description": "Tell Jack about a job"},
-        {"item": "My prices", "id": "PRICES", "description": "See your saved prices"},
-        {"item": "Help", "id": "HELP", "description": "Everything you can send"},
+        {"item": title, "id": command, "description": description}
+        for title, command, description in MENU_CHOICES
     ],
 }
 

@@ -1,6 +1,6 @@
 from datetime import date
 
-from quotes import money, parse_quote, reference, to_pence, uk_date
+from quotes import money, parse_job, parse_quote, reference, to_pence, uk_date
 
 
 def test_money_adds_pound_sign_and_pence():
@@ -68,3 +68,14 @@ def test_parse_quote_reads_the_scope_of_works():
 def test_parse_quote_rejects_a_line_that_isnt_a_bullet():
     assert parse_quote("Mrs Jones | Bathroom | BR | 1250\nRemove old suite") is None
     assert parse_quote("Mrs Jones | Bathroom | BR | 1250\n- ") is None
+
+
+def test_parse_job_with_and_without_an_address():
+    assert parse_job("Mrs Jones | 12 Test Road, Liverpool | Leaking radiator") == {
+        "customer_name": "Mrs Jones",
+        "work": "Leaking radiator",
+        "address": "12 Test Road\nLiverpool",
+    }
+    assert parse_job("Mrs Jones | Leaking radiator")["address"] is None
+    assert parse_job("leaking radiator for mrs jones") is None
+    assert parse_job("Mrs Jones |  | Leaking radiator") is None

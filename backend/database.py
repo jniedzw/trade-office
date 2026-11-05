@@ -142,6 +142,21 @@ class Invoice(SQLModel, table=True):
     time: datetime = Field(default_factory=now_utc)
 
 
+class Job(SQLModel, table=True):
+    """A piece of work for a customer, logged before it's quoted or booked."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    client_id: int = Field(foreign_key="client.id", index=True)
+    customer_name: str
+    # Either can be missing when the job's logged, and filled in later.
+    customer_phone: str | None = None
+    address: str | None = None
+    work: str
+    # logged, then quoted, booked, done, invoiced and paid as those features arrive.
+    status: str = "logged"
+    time: datetime = Field(default_factory=now_utc)
+
+
 class PriceItem(SQLModel, table=True):
     """One of a client's standard prices, like a boiler service for £85."""
 
@@ -406,6 +421,36 @@ def count_quotes_today(client_id):
     midnight = now_utc().replace(hour=0, minute=0, second=0, microsecond=0)
     with Session(engine) as session:
         statement = select(Quote.id).where(Quote.client_id == client_id, Quote.time >= midnight)
+        return len(session.exec(statement).all())
+
+
+def save_job(client_id, customer_name, work, customer_phone=None, address=None):
+    """Save a new job and return its ID."""
+    job = Job(
+        client_id=client_id,
+        customer_name=customer_name,
+        work=work,
+        customer_phone=customer_phone,
+        address=address,
+    )
+    with Session(engine) as session:
+        session.add(job)
+        session.commit()
+        session.refresh(job)
+        return job.id
+
+
+def get_job(job_id):
+    """Return the job with this ID, or None."""
+    with Session(engine) as session:
+        return session.get(Job, job_id)
+
+
+def count_jobs_today(client_id):
+    """Return how many jobs this client has logged since midnight (UTC)."""
+    midnight = now_utc().replace(hour=0, minute=0, second=0, microsecond=0)
+    with Session(engine) as session:
+        statement = select(Job.id).where(Job.client_id == client_id, Job.time >= midnight)
         return len(session.exec(statement).all())
 
 

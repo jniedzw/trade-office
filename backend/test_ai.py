@@ -3,7 +3,7 @@ import httpx2
 
 import ai
 import settings
-from ai import QuoteDraft, change_quote, prices_in, read_quote
+from ai import JobDraft, QuoteDraft, change_quote, prices_in, read_job, read_quote, uk_mobile
 from database import Quote
 
 MESSAGE = "bathroom for mrs jones, rip out old suite, new basin and loo, 1,250 all in"
@@ -12,7 +12,7 @@ MESSAGE = "bathroom for mrs jones, rip out old suite, new basin and loo, 1,250 a
 def use_fake_claude(monkeypatch, draft):
     """Make ask_claude return draft instead of calling the real AI."""
     monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.setattr(ai, "ask_claude", lambda message, system: draft)
+    monkeypatch.setattr(ai, "ask_claude", lambda message, system, shape: draft)
 
 
 def good_draft(**changes):
@@ -71,7 +71,7 @@ def test_read_quote_when_claude_refuses(monkeypatch):
 def test_read_quote_when_the_ai_is_down(monkeypatch, capsys):
     monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "test-key")
 
-    def broken(message, system):
+    def broken(message, system, shape):
         request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
         raise anthropic.APIConnectionError(request=request)
 
@@ -85,7 +85,7 @@ def test_read_quote_when_the_ai_is_down(monkeypatch, capsys):
 def test_read_quote_without_a_key_never_calls_claude(monkeypatch):
     monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", None)
 
-    def must_not_run(message, system):
+    def must_not_run(message, system, shape):
         raise AssertionError("called Claude")
 
     monkeypatch.setattr(ai, "ask_claude", must_not_run)
@@ -124,3 +124,31 @@ def test_change_quote_rejects_an_invented_price(monkeypatch):
     use_fake_claude(monkeypatch, good_draft(price="1400"))
 
     assert change_quote(saved_quote(), ["Remove old suite"], "add tiling the floor") is None
+
+
+def test_uk_mobile_must_be_in_the_message():
+    message = "mrs jones 07700 900123 leaking rad"
+    assert uk_mobile("07700 900123", message) == "+447700900123"
+    assert uk_mobile("+44 7700 900123", "call +44 7700 900123") == "+447700900123"
+    # Made up by the AI, or not a mobile.
+    assert uk_mobile("07700 900999", message) is None
+    assert uk_mobile("0151 496 0000", "0151 496 0000") is None
+
+
+def test_read_job_drops_a_made_up_address(monkeypatch):
+    draft = JobDraft(
+        customer_name="Mrs Jones",
+        customer_phone=None,
+        address="99 Made Up Street",
+        work="Leaking radiator",
+    )
+    use_fake_claude(monkeypatch, draft)
+
+    job = read_job("mrs jones leaking rad")
+
+    assert job == {
+        "customer_name": "Mrs Jones",
+        "work": "Leaking radiator",
+        "customer_phone": None,
+        "address": None,
+    }

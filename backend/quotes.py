@@ -85,6 +85,18 @@ def parse_quote(details):
     }
 
 
+def parse_job(details):
+    """Read "Mrs Jones | 12 Elm Road, Liverpool | Leaking radiator" into a dict, or None.
+
+    The address is optional, so "Mrs Jones | Leaking radiator" works too.
+    """
+    parts = [part.strip() for part in details.split("|")]
+    if len(parts) not in (2, 3) or "" in parts:
+        return None
+    address = parts[1].replace(", ", "\n") if len(parts) == 3 else None
+    return {"customer_name": parts[0], "work": parts[-1], "address": address}
+
+
 def reference(prefix, job_code, day):
     """Return a quote reference like DPL-BR-011126.
 
