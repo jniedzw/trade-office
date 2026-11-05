@@ -996,13 +996,51 @@ def test_invoice_numbers_go_up_by_one(monkeypatch, tmp_path):
     assert text.startswith("Invoice 2 saved for Mr Smith, £85.00.")
 
 
-def test_invoice_needs_an_address(monkeypatch, tmp_path):
+def test_invoice_without_an_address_asks_for_one(monkeypatch, tmp_path):
     use_final_quote(monkeypatch, tmp_path)
 
     text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "INVOICE 1")
-
-    assert text == main.INVOICE_HELP
+    assert text.startswith("What's Mrs Jones's address?")
     assert database.get_invoice_for_quote(1) is None
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "12 Test Road\nLiverpool")
+    assert text.startswith("Invoice 1 saved for Mrs Jones")
+    assert database.get_invoice_for_quote(1).customer_address == "12 Test Road\nLiverpool"
+
+
+def test_a_command_instead_of_an_answer_forgets_the_question(monkeypatch, tmp_path):
+    use_final_quote(monkeypatch, tmp_path)
+    main.whatsapp_reply(f"whatsapp:{OWNER}", "INVOICE 1")
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "QUOTE Mr Smith | Boiler | BS | 85")
+    assert text.startswith("Draft quote 2 saved")
+
+    # The question's gone, so an address now is just a message, not an invoice.
+    main.whatsapp_reply(f"whatsapp:{OWNER}", "12 Test Road")
+    assert database.get_invoice_for_quote(1) is None
+
+
+def test_an_old_question_is_forgotten(monkeypatch, tmp_path):
+    use_final_quote(monkeypatch, tmp_path)
+    database.ask_question(1, "invoice_address", 1)
+    with Session(database.engine) as session:
+        row = session.exec(select(database.PendingQuestion)).first()
+        row.time = database.now_utc() - timedelta(hours=25)
+        session.add(row)
+        session.commit()
+
+    main.whatsapp_reply(f"whatsapp:{OWNER}", "12 Test Road")
+
+    assert database.get_invoice_for_quote(1) is None
+
+
+def test_make_invoice_on_an_invoiced_quote_resends_it(monkeypatch, tmp_path):
+    use_final_quote(monkeypatch, tmp_path)
+    main.whatsapp_reply(f"whatsapp:{OWNER}", "INVOICE 1" + ADDRESS)
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "INVOICE 1")
+
+    assert text.startswith("Invoice 1 saved")
 
 
 def test_a_draft_cant_be_invoiced(monkeypatch, tmp_path):
@@ -1114,3 +1152,16 @@ def test_a_plain_reply_if_buttons_fail(monkeypatch, tmp_path):
     # The PDF already went, so the plain reply is just the words.
     assert "Quote 1 is final" in response.text
     assert "<Media>" not in response.text
+
+
+def test_quotes_stop_at_the_daily_limit(monkeypatch, tmp_path):
+    texted_numbers = use_fakes(monkeypatch, tmp_path)
+    monkeypatch.setattr(main, "MAX_QUOTES_PER_DAY", 2)
+    for _ in range(2):
+        main.whatsapp_reply(f"whatsapp:{OWNER}", "QUOTE Mr Smith | Boiler | BS | 85")
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "QUOTE Mr Smith | Boiler | BS | 85")
+
+    assert text.startswith("That's 2 quotes today")
+    assert database.get_quote(3) is None
+    assert texted_numbers == [JAMES]

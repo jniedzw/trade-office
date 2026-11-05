@@ -10,6 +10,8 @@ from twilio.twiml.voice_response import VoiceResponse
 import settings
 from ai import read_quote
 from database import (
+    ask_question,
+    count_quotes_today,
     create_tables,
     delete_old_calls,
     finish_quote,
@@ -30,6 +32,7 @@ from database import (
     opt_out,
     overdue_alert_sids,
     pop_pending_alert,
+    pop_question,
     retention_cutoff,
     save_invoice,
     save_pending_alert,
@@ -60,6 +63,9 @@ START_WORDS = {"START", "UNSTOP"}
 # Alerts stop after this many calls from a number we've already texted, so 50 scam
 # calls can't flood the owner's phone, but someone ringing urgently still gets seen.
 MAX_ALERTS = 3
+
+# Far more quotes than a tradesperson makes in a day, so only a fault or misuse hits it.
+MAX_QUOTES_PER_DAY = 50
 
 WHATSAPP_NOT_A_CLIENT = "Hi, this is Ask Jack, admin for UK tradespeople. See askjack.uk or email hello@askjack.uk."
 
@@ -227,6 +233,10 @@ def buttons_for(template, quote_id):
 
 def quote_reply(client, details):
     """Save a draft quote and return our reply and a link to its PDF (or None)."""
+    # A cap, so a fault or misuse can't run up a big AI bill.
+    if count_quotes_today(client.id) >= MAX_QUOTES_PER_DAY:
+        alert_james(client, "hit the daily quote limit.")
+        return Reply(f"That's {MAX_QUOTES_PER_DAY} quotes today, the daily limit. Try again tomorrow.")
     # The exact typed format first: it's free and can't be misread. Then the AI.
     quote = parse_quote(details) or read_quote(details)
     if quote is None:
@@ -269,11 +279,14 @@ INVOICE_HELP = "To make an invoice, send INVOICE, the quote number, then the cus
 
 
 def invoice_reply(client, details):
-    """Make an invoice from a final quote and return our reply."""
+    """Make an invoice from a final quote and return our reply.
+
+    With no address, as when the tradesperson taps Make invoice, Jack asks for one.
+    """
     first_line, *address_lines = details.strip().splitlines() or [""]
     number = first_line.strip()
     address = "\n".join(line.strip() for line in address_lines if line.strip())
-    if not number.isdigit() or address == "":
+    if not number.isdigit():
         return Reply(INVOICE_HELP)
 
     quote = get_quote(int(number))
@@ -285,6 +298,12 @@ def invoice_reply(client, details):
     if get_business_details(client.id) is None:
         alert_james(client, "tried to invoice without business details.")
         return Reply("Your invoice details aren't set up yet. We've been told and will sort it.")
+    if address == "" and get_invoice_for_quote(quote.id) is None:
+        ask_question(client.id, "invoice_address", quote.id)
+        return Reply(
+            f"What's {quote.customer_name}'s address? "
+            "Send it in one message, with each part on a new line."
+        )
 
     # Sending INVOICE twice for one quote gives the same invoice, not a second one.
     invoice = get_invoice_for_quote(quote.id) or save_invoice(client.id, quote.id, address)
@@ -295,6 +314,18 @@ def invoice_reply(client, details):
     return with_pdf(text, "invoice", invoice.id)
 
 
+# The first words of every command, as lists so they compare with split()[:1].
+COMMANDS = [["QUOTE"], ["FINAL"], ["INVOICE"], ["ALERTS"]]
+
+
+def answer_question(client, question, answer):
+    """Handle the reply to a question Jack asked, and return our Reply."""
+    asked, quote_id = question
+    if asked == "invoice_address":
+        return invoice_reply(client, f"{quote_id}\n{answer}")
+    return Reply("Sorry, I lost track of that. Please start again.")
+
+
 def whatsapp_reply(sender, body=""):
     """Handle a WhatsApp message and return our Reply."""
     # Twilio writes WhatsApp numbers as "whatsapp:+447...", so take that off first.
@@ -303,6 +334,12 @@ def whatsapp_reply(sender, body=""):
         return Reply(WHATSAPP_NOT_A_CLIENT)
 
     command = body.strip().upper()
+    first_word = command.split()[:1]
+    # Jack's question only gets an answer if this isn't a new command.
+    question = pop_question(client.id)
+    if question is not None and first_word not in COMMANDS:
+        return answer_question(client, question, body)
+
     if command == "ALERTS ON":
         set_whatsapp_alerts(client.id, True)
         return Reply("Done. Missed-call alerts will come here. Send ALERTS OFF for texts.")

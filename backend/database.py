@@ -14,6 +14,8 @@ RETENTION_DAYS = 365
 ALERT_WAIT_MINUTES = 2
 # A caller only gets one text-back in this many hours, however often they ring.
 REPEAT_HOURS = 24
+# Jack forgets a question that hasn't been answered in this many hours.
+QUESTION_HOURS = 24
 
 
 class Client(SQLModel, table=True):
@@ -137,6 +139,18 @@ class Invoice(SQLModel, table=True):
     number: int
     # Invoices must show the customer's address; quotes don't need it.
     customer_address: str
+    time: datetime = Field(default_factory=now_utc)
+
+
+class PendingQuestion(SQLModel, table=True):
+    """Something Jack asked a client and is waiting to hear back about."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    # One question at a time per client: a new one replaces the old.
+    client_id: int = Field(foreign_key="client.id", unique=True)
+    # What was asked, like "invoice_address", and which quote it's about.
+    question: str
+    quote_id: int
     time: datetime = Field(default_factory=now_utc)
 
 
@@ -319,6 +333,48 @@ def save_invoice(client_id, quote_id, customer_address):
         session.commit()
         session.refresh(invoice)
         return invoice
+
+
+def ask_question(client_id, question, quote_id):
+    """Remember that Jack asked this client something, replacing any older question."""
+    with Session(engine) as session:
+        statement = select(PendingQuestion).where(PendingQuestion.client_id == client_id)
+        old = session.exec(statement).first()
+        if old is not None:
+            session.delete(old)
+            # Delete first, so the new row doesn't clash with the old one's client_id.
+            session.flush()
+        session.add(PendingQuestion(client_id=client_id, question=question, quote_id=quote_id))
+        session.commit()
+
+
+def pop_question(client_id):
+    """Forget this client's question and return (question, quote_id), or None.
+
+    A question older than QUESTION_HOURS is forgotten without being returned.
+    """
+    with Session(engine) as session:
+        statement = select(PendingQuestion).where(PendingQuestion.client_id == client_id)
+        row = session.exec(statement).first()
+        if row is None:
+            return None
+        # Read everything before deleting: after commit the row can't be read.
+        result = (row.question, row.quote_id)
+        # SQLite gives back times without a timezone, so add UTC before comparing.
+        asked = row.time.replace(tzinfo=timezone.utc)
+        session.delete(row)
+        session.commit()
+    if asked < now_utc() - timedelta(hours=QUESTION_HOURS):
+        return None
+    return result
+
+
+def count_quotes_today(client_id):
+    """Return how many quotes this client has made since midnight (UTC)."""
+    midnight = now_utc().replace(hour=0, minute=0, second=0, microsecond=0)
+    with Session(engine) as session:
+        statement = select(Quote.id).where(Quote.client_id == client_id, Quote.time >= midnight)
+        return len(session.exec(statement).all())
 
 
 def get_quote(quote_id):
