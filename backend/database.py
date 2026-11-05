@@ -142,6 +142,18 @@ class Invoice(SQLModel, table=True):
     time: datetime = Field(default_factory=now_utc)
 
 
+class PriceItem(SQLModel, table=True):
+    """One of a client's standard prices, like a boiler service for £85."""
+
+    __table_args__ = (UniqueConstraint("client_id", "name"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    client_id: int = Field(foreign_key="client.id", index=True)
+    # Saved in lower case, so "Boiler Service" and "boiler service" are one price.
+    name: str
+    pence: int
+
+
 class PendingQuestion(SQLModel, table=True):
     """Something Jack asked a client and is waiting to hear back about."""
 
@@ -395,6 +407,38 @@ def count_quotes_today(client_id):
     with Session(engine) as session:
         statement = select(Quote.id).where(Quote.client_id == client_id, Quote.time >= midnight)
         return len(session.exec(statement).all())
+
+
+def set_price(client_id, name, pence):
+    """Save one of this client's prices, replacing the old one with that name."""
+    name = name.strip().lower()
+    with Session(engine) as session:
+        statement = select(PriceItem).where(PriceItem.client_id == client_id, PriceItem.name == name)
+        item = session.exec(statement).first() or PriceItem(client_id=client_id, name=name)
+        item.pence = pence
+        session.add(item)
+        session.commit()
+
+
+def delete_price(client_id, name):
+    """Delete one of this client's prices. Return False if there wasn't one."""
+    with Session(engine) as session:
+        statement = select(PriceItem).where(
+            PriceItem.client_id == client_id, PriceItem.name == name.strip().lower()
+        )
+        item = session.exec(statement).first()
+        if item is None:
+            return False
+        session.delete(item)
+        session.commit()
+        return True
+
+
+def get_prices(client_id):
+    """Return this client's prices as (name, pence) pairs, in A to Z order."""
+    with Session(engine) as session:
+        statement = select(PriceItem).where(PriceItem.client_id == client_id).order_by(PriceItem.name)
+        return [(item.name, item.pence) for item in session.exec(statement).all()]
 
 
 def get_quote(quote_id):

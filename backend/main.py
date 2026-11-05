@@ -10,6 +10,9 @@ from twilio.twiml.voice_response import VoiceResponse
 import settings
 from ai import change_quote, read_quote
 from database import (
+    delete_price,
+    get_prices,
+    set_price,
     ask_question,
     count_quotes_today,
     create_tables,
@@ -48,6 +51,7 @@ from quotes import (
     money,
     parse_quote,
     signed_link,
+    to_pence,
 )
 from sms import (
     count_old_twilio_records,
@@ -316,7 +320,47 @@ def invoice_reply(client, details):
 
 
 # The first words of every command, as lists so they compare with split()[:1].
-COMMANDS = [["QUOTE"], ["FINAL"], ["INVOICE"], ["CHANGE"], ["ALERTS"]]
+def is_new_command(command):
+    """Return True if a message is clearly a new command, not an answer to Jack.
+
+    Answers often start with words like "change" or "price" ("change the price
+    to 1300"), so only messages that can't be an answer count as commands.
+    """
+    words = command.split()
+    if command in ("ALERTS ON", "ALERTS OFF", "PRICES") or words[:1] == ["QUOTE"]:
+        return True
+    # FINAL 6, INVOICE 6 and CHANGE 6 need a quote number straight after.
+    return words[:1] in (["FINAL"], ["INVOICE"], ["CHANGE"]) and words[1:2] != [] and words[1].isdigit()
+
+PRICE_HELP = (
+    "To save a price, send PRICE, the job and the price, like:\nPRICE boiler service 85\n"
+    "To remove one: PRICE boiler service DELETE\nTo see them all: PRICES"
+)
+
+
+def price_reply(client, details):
+    """Save, change or delete one of the client's standard prices."""
+    name, _, last_word = details.strip().rpartition(" ")
+    if name.strip() == "":
+        return Reply(PRICE_HELP)
+    if last_word.upper() == "DELETE":
+        if delete_price(client.id, name):
+            return Reply(f"Deleted the price for {name.strip().lower()}.")
+        return Reply(f"There's no price for {name.strip().lower()}. Send PRICES to see them.")
+    pence = to_pence(last_word)
+    if pence is None:
+        return Reply(PRICE_HELP)
+    set_price(client.id, name, pence)
+    return Reply(f"Saved: {name.strip().lower()}, {money(pence)}.")
+
+
+def prices_reply(client):
+    """List the client's standard prices."""
+    prices = get_prices(client.id)
+    if not prices:
+        return Reply("You haven't saved any prices yet.\n" + PRICE_HELP)
+    lines = [f"{name}: {money(pence)}" for name, pence in prices]
+    return Reply("Your prices:\n" + "\n".join(lines))
 
 
 CHANGE_HELP = "To change a quote, send CHANGE, its number and what to change, like:\nCHANGE 3 price is 1300"
@@ -377,7 +421,7 @@ def whatsapp_reply(sender, body=""):
     first_word = command.split()[:1]
     # Jack's question only gets an answer if this isn't a new command.
     question = pop_question(client.id)
-    if question is not None and first_word not in COMMANDS:
+    if question is not None and not is_new_command(command):
         return answer_question(client, question, body)
 
     if command == "ALERTS ON":
@@ -391,6 +435,10 @@ def whatsapp_reply(sender, body=""):
         return quote_reply(client, body.strip()[len("QUOTE"):])
     if command.split()[:1] == ["INVOICE"]:
         return invoice_reply(client, body.strip()[len("INVOICE"):])
+    if first_word == ["PRICES"]:
+        return prices_reply(client)
+    if first_word == ["PRICE"]:
+        return price_reply(client, body.strip()[len("PRICE"):])
     if command.split()[:1] == ["CHANGE"]:
         return change_reply(client, body.strip()[len("CHANGE"):])
     if command.split()[:1] == ["FINAL"]:

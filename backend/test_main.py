@@ -1255,3 +1255,56 @@ def test_a_client_cant_change_another_clients_quote(monkeypatch, tmp_path):
 
     assert text == "There's no quote 1 for Other Plumbing."
     assert database.get_quote(1).total_pence == 125050
+
+
+def test_saving_changing_and_listing_prices(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "price Boiler Service 85")
+    assert text == "Saved: boiler service, £85.00."
+    main.whatsapp_reply(f"whatsapp:{OWNER}", "PRICE boiler service £90")
+    main.whatsapp_reply(f"whatsapp:{OWNER}", "PRICE gas safety cert 65")
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "PRICES")
+    assert text == "Your prices:\nboiler service: £90.00\ngas safety cert: £65.00"
+
+
+def test_deleting_a_price(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    main.whatsapp_reply(f"whatsapp:{OWNER}", "PRICE boiler service 85")
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "PRICE boiler service delete")
+    assert text == "Deleted the price for boiler service."
+    assert database.get_prices(1) == []
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "PRICE boiler service DELETE")
+    assert text.startswith("There's no price for boiler service")
+
+
+def test_a_badly_written_price_gets_help(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    for message in ["PRICE", "PRICE 85", "PRICE boiler service", "PRICE boiler service abc"]:
+        text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", message)
+        assert text == main.PRICE_HELP, message
+    assert database.get_prices(1) == []
+
+
+def test_no_prices_yet(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "PRICES")
+
+    assert text.startswith("You haven't saved any prices yet.")
+
+
+def test_is_new_command():
+    assert main.is_new_command("QUOTE MRS JONES | BATHROOM | BR | 1250") is True
+    assert main.is_new_command("FINAL 6") is True
+    assert main.is_new_command("CHANGE 6 PRICE IS 1300") is True
+    assert main.is_new_command("PRICES") is True
+    # Answers that happen to start with a command's word.
+    assert main.is_new_command("CHANGE THE PRICE TO 1300") is False
+    assert main.is_new_command("PRICE IS 1300") is False
+    assert main.is_new_command("FINAL PRICE 1300") is False
+    assert main.is_new_command("12 ELM ROAD") is False

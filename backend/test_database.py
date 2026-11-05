@@ -200,3 +200,14 @@ def test_a_new_column_is_added_to_an_old_table(monkeypatch, tmp_path):
 
     assert database.get_business_details(1).brand_colour == "#b8975a"
     assert database.get_business_details(1).contact == ""
+
+
+def test_prices_belong_to_one_client(monkeypatch, tmp_path):
+    engine = use_temp_database(monkeypatch, tmp_path)
+    add_client(engine, "+447700900001")  # client 1
+    add_client(engine, "+447700900002")  # client 2
+
+    database.set_price(1, "Boiler Service", 8500)
+
+    assert database.get_prices(1) == [("boiler service", 8500)]
+    assert database.get_prices(2) == []
