@@ -142,6 +142,8 @@ class Invoice(SQLModel, table=True):
     # Invoices must show the customer's address; quotes don't need it.
     customer_address: str
     time: datetime = Field(default_factory=now_utc)
+    # When it was paid, or None while it's still owed.
+    paid_at: datetime | None = None
 
 
 class Job(SQLModel, table=True):
@@ -189,6 +191,7 @@ NEW_COLUMNS = [
     ("businessdetails", "brand_colour", "VARCHAR NOT NULL DEFAULT '#b8975a'"),
     ("businessdetails", "contact", "VARCHAR NOT NULL DEFAULT ''"),
     ("quote", "job_id", "INTEGER"),
+    ("invoice", "paid_at", "DATETIME"),
 ]
 
 
@@ -302,10 +305,7 @@ def save_quote(client_id, customer_name, title, job_code, total_pence, lines=(),
         session.flush()
         for position, text in enumerate(lines):
             session.add(QuoteLine(quote_id=quote.id, position=position, text=text))
-        if job_id is not None:
-            job = session.get(Job, job_id)
-            job.status = "quoted"
-            session.add(job)
+        set_job_status(session, job_id, "quoted")
         session.commit()
         return quote.id
 
@@ -388,9 +388,66 @@ def save_invoice(client_id, quote_id, customer_address):
             customer_address=customer_address,
         )
         session.add(invoice)
+        set_job_status(session, session.get(Quote, quote_id).job_id, "invoiced")
         session.commit()
         session.refresh(invoice)
         return invoice
+
+
+def set_job_status(session, job_id, status):
+    """Move a job on to status, inside an open session. Does nothing without a job."""
+    if job_id is not None:
+        job = session.get(Job, job_id)
+        job.status = status
+        session.add(job)
+
+
+def as_utc(moment):
+    """Return a time from SQLite with its UTC timezone put back."""
+    # SQLite stores times without a timezone, so they come back without one.
+    return moment.replace(tzinfo=timezone.utc)
+
+
+def unpaid_invoices(client_id):
+    """Return this client's unpaid invoices, oldest first.
+
+    Each is a dict with the invoice number, customer, amount and date.
+    """
+    with Session(engine) as session:
+        statement = (
+            select(Invoice, Quote)
+            .where(Invoice.quote_id == Quote.id)
+            .where(Invoice.client_id == client_id, Invoice.paid_at == None)  # noqa: E711
+            .order_by(Invoice.time)
+        )
+        return [
+            {
+                "number": invoice.number,
+                "customer_name": quote.customer_name,
+                "total_pence": quote.total_pence,
+                "time": as_utc(invoice.time),
+            }
+            for invoice, quote in session.exec(statement).all()
+        ]
+
+
+def mark_paid(client_id, number):
+    """Mark this client's invoice as paid.
+
+    Return "paid", "already paid", or None if they have no invoice with that number.
+    """
+    with Session(engine) as session:
+        statement = select(Invoice).where(Invoice.client_id == client_id, Invoice.number == number)
+        invoice = session.exec(statement).first()
+        if invoice is None:
+            return None
+        if invoice.paid_at is not None:
+            return "already paid"
+        invoice.paid_at = now_utc()
+        session.add(invoice)
+        set_job_status(session, session.get(Quote, invoice.quote_id).job_id, "paid")
+        session.commit()
+        return "paid"
 
 
 def ask_question(client_id, question, quote_id):

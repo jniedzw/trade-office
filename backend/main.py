@@ -10,6 +10,8 @@ from twilio.twiml.voice_response import VoiceResponse
 import settings
 from ai import change_quote, read_job, read_quote
 from database import (
+    mark_paid,
+    unpaid_invoices,
     get_job,
     count_jobs_today,
     save_job,
@@ -382,10 +384,12 @@ def is_new_command(command):
     to 1300"), so only messages that can't be an answer count as commands.
     """
     words = command.split()
-    if command in ("ALERTS ON", "ALERTS OFF", "PRICES", "HELP") or words[:1] in (["QUOTE"], ["LOG"]):
+    if command in ("ALERTS ON", "ALERTS OFF", "PRICES", "HELP", "OWED", "PAID"):
+        return True
+    if words[:1] in (["QUOTE"], ["LOG"]):
         return True
     # FINAL 6, INVOICE 6 and CHANGE 6 need a quote number straight after.
-    return words[:1] in (["FINAL"], ["INVOICE"], ["CHANGE"]) and words[1:2] != [] and words[1].isdigit()
+    return words[:1] in (["FINAL"], ["INVOICE"], ["CHANGE"], ["PAID"]) and words[1:2] != [] and words[1].isdigit()
 
 PRICE_HELP = (
     "To save a price, send PRICE, the job and the price, like:\nPRICE boiler service 85\n"
@@ -468,6 +472,8 @@ def answer_question(client, question, answer):
         return log_reply(client, answer)
     if asked == "quote_job":
         return quote_from_job(client, quote_id, answer)
+    if asked == "mark_paid":
+        return paid_reply(client, answer)
     return Reply("Sorry, I lost track of that. Please start again.")
 
 
@@ -502,6 +508,44 @@ def log_reply(client, details):
     return Reply("\n".join(lines), None, buttons_for(settings.WHATSAPP_JOB_BUTTONS, job_id))
 
 
+def owed_reply(client):
+    """List who owes the client money, oldest first, with how overdue each is."""
+    invoices = unpaid_invoices(client.id)
+    if not invoices:
+        return Reply("Nobody owes you anything. Nice one.")
+    details = get_business_details(client.id)
+    days_to_pay = details.payment_days if details else 14
+    lines = []
+    for invoice in invoices:
+        overdue = (now_utc() - invoice["time"]).days - days_to_pay
+        late = f", {overdue} days overdue" if overdue > 0 else ""
+        lines.append(
+            f"Invoice {invoice['number']}: {invoice['customer_name']}, "
+            f"{money(invoice['total_pence'])}{late}"
+        )
+    total = sum(invoice["total_pence"] for invoice in invoices)
+    return Reply("Who owes you:\n" + "\n".join(lines) + f"\nTotal: {money(total)}")
+
+
+def paid_reply(client, details):
+    """Mark an invoice as paid. With no number, list what's owed and ask which."""
+    number = details.strip().removeprefix("INVOICE").removeprefix("invoice").strip()
+    if number == "":
+        owed = owed_reply(client)
+        if not unpaid_invoices(client.id):
+            return owed
+        ask_question(client.id, "mark_paid", 0)
+        return Reply(owed.text + "\n\nWhich invoice has been paid? Send its number.")
+    if not number.isdigit():
+        return Reply("To mark an invoice as paid, send PAID and its number, like PAID 3.")
+    result = mark_paid(client.id, int(number))
+    if result is None:
+        return Reply(f"There's no invoice {number} for {client.business_name}.")
+    if result == "already paid":
+        return Reply(f"Invoice {number} was already marked as paid.")
+    return Reply(f"Invoice {number} marked as paid.")
+
+
 def alerts_reply(client, details):
     """Turn WhatsApp alerts on or off."""
     if details.strip().upper() == "ON":
@@ -524,6 +568,8 @@ COMMANDS = {
     "PRICES": lambda client, rest: prices_reply(client),
     "HELP": lambda client, rest: Reply(HELP_TEXT),
     "ALERTS": lambda client, rest: alerts_reply(client, rest),
+    "PAID": lambda client, rest: paid_reply(client, rest),
+    "OWED": lambda client, rest: owed_reply(client),
 }
 
 

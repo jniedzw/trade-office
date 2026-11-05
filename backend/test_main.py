@@ -1479,3 +1479,74 @@ def test_a_logged_job_gets_a_quote_it_button(monkeypatch, tmp_path):
     signed_whatsapp(OWNER, "LOG Mrs Jones | Leaking radiator")
 
     assert sent == [("HX_JOB", "1")]
+
+
+def make_invoice(quote_id, days_ago=0):
+    """Invoice a final quote for the test client, dated days_ago days back."""
+    invoice = database.save_invoice(1, quote_id, "12 Test Road")
+    with Session(database.engine) as session:
+        row = session.get(database.Invoice, invoice.id)
+        row.time = database.now_utc() - timedelta(days=days_ago)
+        session.add(row)
+        session.commit()
+    return invoice.number
+
+
+def test_who_owes_me_lists_unpaid_invoices_oldest_first(monkeypatch, tmp_path):
+    use_final_quote(monkeypatch, tmp_path)  # quote 1, Mrs Jones £1,250.50, 14 days to pay
+    database.save_quote(1, "Mr Smith", "Boiler service", "BS", 8500)
+    make_invoice(2, days_ago=3)
+    make_invoice(1, days_ago=20)
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "Who owes me")
+
+    assert text == (
+        "Who owes you:\n"
+        "Invoice 2: Mrs Jones, £1,250.50, 6 days overdue\n"
+        "Invoice 1: Mr Smith, £85.00\n"
+        "Total: £1,335.50"
+    )
+
+
+def test_nobody_owes_anything(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "OWED")
+
+    assert text.startswith("Nobody owes you anything")
+
+
+def test_paid_marks_an_invoice_and_its_job(monkeypatch, tmp_path):
+    use_final_quote(monkeypatch, tmp_path)
+    log_test_job()
+    quote_id = database.save_quote(1, "Mrs Jones", "Radiator", "RAD", 45000, job_id=1)
+    make_invoice(quote_id)
+    assert database.get_job(1).status == "invoiced"
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "paid 1")
+    assert text == "Invoice 1 marked as paid."
+    assert database.unpaid_invoices(1) == []
+    assert database.get_job(1).status == "paid"
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "PAID 1")
+    assert text == "Invoice 1 was already marked as paid."
+
+
+def test_mark_as_paid_from_the_menu_asks_which(monkeypatch, tmp_path):
+    use_final_quote(monkeypatch, tmp_path)
+    make_invoice(1)
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "Mark as paid")
+    assert text.startswith("Who owes you:\nInvoice 1: Mrs Jones")
+    assert text.endswith("Which invoice has been paid? Send its number.")
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "1")
+    assert text == "Invoice 1 marked as paid."
+
+
+def test_paid_for_an_invoice_that_isnt_theirs(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "PAID 7")
+
+    assert text == "There's no invoice 7 for Test Plumbing."

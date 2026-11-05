@@ -10,6 +10,8 @@ menu template: python create_button_templates.py WHATSAPP_MENU
 MENU_CHOICES = [
     ("Log a job", "LOG", "Save a new job or enquiry"),
     ("New quote", "QUOTE", "Tell Jack about a job"),
+    ("Who owes me", "OWED", "Unpaid invoices, oldest first"),
+    ("Mark as paid", "PAID", "Record a payment"),
     ("My prices", "PRICES", "See your saved prices"),
     ("Help", "HELP", "Everything you can send"),
 ]
@@ -27,6 +29,8 @@ HELP_TEXT = (
     "CHANGE 6 and what to change\n"
     "FINAL 6 to finish quote 6\n"
     "INVOICE 6 to invoice it\n"
+    "OWED to see who owes you\n"
+    "PAID 3 when invoice 3 is paid\n"
     "PRICE boiler service 85 to save a price\n"
     "PRICES to see your prices\n"
     "Or just say hi for the menu."
