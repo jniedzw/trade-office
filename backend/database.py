@@ -290,6 +290,26 @@ def save_business_details(client_id, **details):
         session.commit()
 
 
+def update_quote(quote_id, customer_name, title, job_code, total_pence, lines):
+    """Replace a quote's details and lines, and make it a draft again."""
+    with Session(engine) as session:
+        quote = session.get(Quote, quote_id)
+        quote.customer_name = customer_name
+        quote.title = title
+        quote.job_code = job_code
+        quote.total_pence = total_pence
+        # A changed quote needs checking again before it's sent.
+        quote.status = "draft"
+        session.add(quote)
+        old_lines = session.exec(select(QuoteLine).where(QuoteLine.quote_id == quote_id))
+        for line in old_lines:
+            session.delete(line)
+        for position, text in enumerate(lines):
+            session.add(QuoteLine(quote_id=quote_id, position=position, text=text))
+        # One commit, so the quote never ends up with half its new lines.
+        session.commit()
+
+
 def finish_quote(client_id, quote_id):
     """Mark this client's quote as final and return it, or None if it isn't theirs."""
     with Session(engine) as session:

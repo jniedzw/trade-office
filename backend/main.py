@@ -8,13 +8,14 @@ from twilio.twiml.messaging_response import MessagingResponse
 from twilio.twiml.voice_response import VoiceResponse
 
 import settings
-from ai import read_quote
+from ai import change_quote, read_quote
 from database import (
     ask_question,
     count_quotes_today,
     create_tables,
     delete_old_calls,
     finish_quote,
+    update_quote,
     get_business_details,
     get_invoice,
     get_invoice_for_quote,
@@ -315,7 +316,44 @@ def invoice_reply(client, details):
 
 
 # The first words of every command, as lists so they compare with split()[:1].
-COMMANDS = [["QUOTE"], ["FINAL"], ["INVOICE"], ["ALERTS"]]
+COMMANDS = [["QUOTE"], ["FINAL"], ["INVOICE"], ["CHANGE"], ["ALERTS"]]
+
+
+CHANGE_HELP = "To change a quote, send CHANGE, its number and what to change, like:\nCHANGE 3 price is 1300"
+
+
+def change_reply(client, details):
+    """Change a quote using what the tradesperson wrote, and return a new draft Reply.
+
+    With nothing to change, as when the tradesperson taps Change, Jack asks what to change.
+    """
+    number, _, change = details.strip().partition(" ")
+    if not number.isdigit():
+        return Reply(CHANGE_HELP)
+    quote = get_quote(int(number))
+    if quote is None or quote.client_id != client.id:
+        return Reply(f"There's no quote {number} for {client.business_name}.")
+    # The invoice is made from the quote, so changing it would change the invoice.
+    if get_invoice_for_quote(quote.id) is not None:
+        return Reply(f"Quote {number} has been invoiced, so it can't change. Send a new QUOTE instead.")
+    if change.strip() == "":
+        ask_question(client.id, "change", quote.id)
+        return Reply(f"What needs changing on quote {number}?")
+
+    changed = change_quote(quote, get_quote_lines(quote.id), change)
+    if changed is None:
+        return Reply(
+            f"Sorry, I couldn't make that change. If it's a new price, include it, "
+            f"like: CHANGE {number} price is 1300"
+        )
+    update_quote(quote.id, **changed)
+    count = len(changed["lines"])
+    lines = "1 line" if count == 1 else f"{count} lines"
+    text = (
+        f"Draft quote {quote.id} changed: {changed['title']} for {changed['customer_name']}, "
+        f"{money(changed['total_pence'])}, {lines} of work."
+    )
+    return with_pdf(text, "quote", quote.id, buttons_for(settings.WHATSAPP_DRAFT_BUTTONS, quote.id))
 
 
 def answer_question(client, question, answer):
@@ -323,6 +361,8 @@ def answer_question(client, question, answer):
     asked, quote_id = question
     if asked == "invoice_address":
         return invoice_reply(client, f"{quote_id}\n{answer}")
+    if asked == "change":
+        return change_reply(client, f"{quote_id} {answer}")
     return Reply("Sorry, I lost track of that. Please start again.")
 
 
@@ -351,6 +391,8 @@ def whatsapp_reply(sender, body=""):
         return quote_reply(client, body.strip()[len("QUOTE"):])
     if command.split()[:1] == ["INVOICE"]:
         return invoice_reply(client, body.strip()[len("INVOICE"):])
+    if command.split()[:1] == ["CHANGE"]:
+        return change_reply(client, body.strip()[len("CHANGE"):])
     if command.split()[:1] == ["FINAL"]:
         return final_reply(client, command.removeprefix("FINAL").strip())
     return Reply(f"Hi, it's Jack. {client.business_name} is connected to WhatsApp.")

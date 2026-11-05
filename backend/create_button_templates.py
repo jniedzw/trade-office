@@ -1,10 +1,12 @@
 """Create the WhatsApp button templates in Twilio. Run it once, from your laptop:
     python create_button_templates.py
-Then put the two IDs it prints in .env and in Render's Environment.
+Then put the IDs it prints in .env and in Render's Environment.
 
 These are only sent as replies inside WhatsApp's 24-hour window, which Twilio
 says needs no approval, so they're never submitted to Meta.
 """
+
+import sys
 
 import requests
 
@@ -17,7 +19,7 @@ CONTENT_API = "https://content.twilio.com/v1/Content"
 TEMPLATES = {
     "WHATSAPP_DRAFT_BUTTONS": [
         {"title": "Make final", "id": "FINAL {{2}}"},
-        {"title": "Start again", "id": "QUOTE"},
+        {"title": "Change", "id": "CHANGE {{2}}"},
     ],
     "WHATSAPP_FINAL_BUTTONS": [
         {"title": "Make invoice", "id": "INVOICE {{2}}"},
@@ -37,8 +39,11 @@ def template(name, buttons):
 
 
 def main():
+    # Name templates to make just those, like: python create_button_templates.py WHATSAPP_DRAFT_BUTTONS
+    names = sys.argv[1:] or list(TEMPLATES)
     auth = (settings.TWILIO_API_KEY_SID, settings.TWILIO_API_KEY_SECRET)
-    for name, buttons in TEMPLATES.items():
+    for name in names:
+        buttons = TEMPLATES[name]
         response = requests.post(CONTENT_API, json=template(name, buttons), auth=auth, timeout=30)
         response.raise_for_status()
         print(f"{name}={response.json()['sid']}")

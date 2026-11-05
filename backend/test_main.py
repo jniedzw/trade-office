@@ -45,6 +45,7 @@ def use_fakes(monkeypatch, tmp_path, active=True, failing=()):
     monkeypatch.setattr(settings, "QUOTE_LINK_SECRET", None)
     # Tests must never reach the real AI, which costs money.
     monkeypatch.setattr(main, "read_quote", lambda details: None)
+    monkeypatch.setattr(main, "change_quote", lambda quote, lines, change: None)
     monkeypatch.setattr(settings, "WHATSAPP_DRAFT_BUTTONS", None)
     monkeypatch.setattr(settings, "WHATSAPP_FINAL_BUTTONS", None)
     # The cleanup job must never reach the real Twilio account from a test.
@@ -1165,3 +1166,92 @@ def test_quotes_stop_at_the_daily_limit(monkeypatch, tmp_path):
     assert text.startswith("That's 2 quotes today")
     assert database.get_quote(3) is None
     assert texted_numbers == [JAMES]
+
+
+def use_fake_change(monkeypatch, changed):
+    """Make the AI's change return changed, without calling the real AI."""
+    monkeypatch.setattr(main, "change_quote", lambda quote, lines, change: changed)
+
+
+CHANGED = {
+    "customer_name": "Mrs Jones",
+    "title": "Bathroom refit",
+    "job_code": "BR",
+    "total_pence": 130000,
+    "lines": ["Remove old suite", "Tile the floor"],
+}
+
+
+def test_change_updates_a_draft(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+    use_fake_change(monkeypatch, CHANGED)
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "change 1 price is 1300, add tiling")
+
+    assert text.startswith("Draft quote 1 changed: Bathroom refit for Mrs Jones, £1,300.00, 2 lines")
+    assert link.startswith(f"{settings.PUBLIC_URL}/quotes/1.pdf")
+    assert database.get_quote(1).total_pence == 130000
+    assert database.get_quote_lines(1) == ["Remove old suite", "Tile the floor"]
+
+
+def test_tapping_change_asks_what_to_change(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+    use_fake_change(monkeypatch, CHANGED)
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "CHANGE 1")
+    assert text == "What needs changing on quote 1?"
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "price is 1300")
+    assert text.startswith("Draft quote 1 changed")
+
+
+def test_changing_a_final_quote_makes_it_a_draft(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+    use_fake_change(monkeypatch, CHANGED)
+    database.finish_quote(1, 1)
+
+    main.whatsapp_reply(f"whatsapp:{OWNER}", "CHANGE 1 price is 1300")
+
+    assert database.get_quote(1).status == "draft"
+
+
+def test_an_invoiced_quote_cant_change(monkeypatch, tmp_path):
+    use_final_quote(monkeypatch, tmp_path)
+    use_fake_change(monkeypatch, CHANGED)
+    main.whatsapp_reply(f"whatsapp:{OWNER}", "INVOICE 1" + ADDRESS)
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "CHANGE 1 price is 1300")
+
+    assert "can't change" in text
+    assert database.get_quote(1).total_pence == 125050
+
+
+def test_a_change_the_ai_cant_make(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+    use_fake_change(monkeypatch, None)
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "CHANGE 1 make it cheaper")
+
+    assert text.startswith("Sorry, I couldn't make that change")
+    assert database.get_quote(1).total_pence == 125050
+
+
+def test_a_client_cant_change_another_clients_quote(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+    use_fake_change(monkeypatch, CHANGED)
+    other_owner = "+447700900790"
+    with Session(database.engine) as session:
+        session.add(
+            Client(
+                business_name="Other Plumbing",
+                owner_mobile=other_owner,
+                twilio_number="+447700900457",
+                text_back_message="Hi",
+            )
+        )
+        session.commit()
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{other_owner}", "CHANGE 1 price 1300")
+
+    assert text == "There's no quote 1 for Other Plumbing."
+    assert database.get_quote(1).total_pence == 125050
