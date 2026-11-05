@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from typing import NamedTuple
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI, Form, HTTPException, Request, Response
@@ -44,7 +45,13 @@ from quotes import (
     parse_quote,
     signed_link,
 )
-from sms import count_old_twilio_records, send_sms, send_whatsapp_alert
+from sms import (
+    count_old_twilio_records,
+    send_sms,
+    send_whatsapp,
+    send_whatsapp_alert,
+    send_whatsapp_buttons,
+)
 
 # The usual opt-out and opt-in words for text messages.
 STOP_WORDS = {"STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"}
@@ -204,12 +211,26 @@ def greeting(business_name, texted):
     return f"Sorry, {business_name} can't take your call right now. Please try again later."
 
 
+class Reply(NamedTuple):
+    """What Jack sends back: words, maybe a PDF link, and maybe buttons."""
+
+    text: str
+    link: str | None = None
+    # A button template's ID and the quote number its buttons act on.
+    buttons: tuple[str, int] | None = None
+
+
+def buttons_for(template, quote_id):
+    """Return buttons for a quote, or None if that template isn't set up."""
+    return (template, quote_id) if template else None
+
+
 def quote_reply(client, details):
     """Save a draft quote and return our reply and a link to its PDF (or None)."""
     # The exact typed format first: it's free and can't be misread. Then the AI.
     quote = parse_quote(details) or read_quote(details)
     if quote is None:
-        return QUOTE_HELP, None
+        return Reply(QUOTE_HELP)
     quote_id = save_quote(client.id, **quote)
     count = len(quote["lines"])
     lines = "1 line" if count == 1 else f"{count} lines"
@@ -218,28 +239,29 @@ def quote_reply(client, details):
         f"{quote['customer_name']}, {money(quote['total_pence'])}, {lines} of work. "
         f"Check it, then send FINAL {quote_id} for the version to send."
     )
-    return with_pdf(text, "quote", quote_id)
+    return with_pdf(text, "quote", quote_id, buttons_for(settings.WHATSAPP_DRAFT_BUTTONS, quote_id))
 
 
-def with_pdf(text, kind, item_id):
+def with_pdf(text, kind, item_id, buttons=None):
     """Return our reply with a link to the PDF, if links can work."""
     # Without the secret no link would work, so send the words on their own.
     if not settings.QUOTE_LINK_SECRET:
-        return text, None
-    return text, signed_link(kind, item_id, now_utc())
+        return Reply(text, None, buttons)
+    return Reply(text, signed_link(kind, item_id, now_utc()), buttons)
 
 
 def final_reply(client, number):
     """Make a quote final and return our reply and a link to the clean PDF."""
     if not number.isdigit():
-        return "To finish a quote, send FINAL and its number, like FINAL 3.", None
+        return Reply("To finish a quote, send FINAL and its number, like FINAL 3.")
     quote = finish_quote(client.id, int(number))
     if quote is None:
-        return f"There's no quote {number} for {client.business_name}.", None
+        return Reply(f"There's no quote {number} for {client.business_name}.")
     return with_pdf(
         f"Quote {quote.id} is final. Forward this PDF to {quote.customer_name}.",
         "quote",
         quote.id,
+        buttons_for(settings.WHATSAPP_FINAL_BUTTONS, quote.id),
     )
 
 
@@ -252,17 +274,17 @@ def invoice_reply(client, details):
     number = first_line.strip()
     address = "\n".join(line.strip() for line in address_lines if line.strip())
     if not number.isdigit() or address == "":
-        return INVOICE_HELP, None
+        return Reply(INVOICE_HELP)
 
     quote = get_quote(int(number))
     if quote is None or quote.client_id != client.id:
-        return f"There's no quote {number} for {client.business_name}.", None
+        return Reply(f"There's no quote {number} for {client.business_name}.")
     if quote.status != "final":
-        return f"Quote {number} is still a draft. Send FINAL {number} first.", None
+        return Reply(f"Quote {number} is still a draft. Send FINAL {number} first.")
     # Bank details come from here, and an invoice without them can't be paid.
     if get_business_details(client.id) is None:
         alert_james(client, "tried to invoice without business details.")
-        return "Your invoice details aren't set up yet. We've been told and will sort it.", None
+        return Reply("Your invoice details aren't set up yet. We've been told and will sort it.")
 
     # Sending INVOICE twice for one quote gives the same invoice, not a second one.
     invoice = get_invoice_for_quote(quote.id) or save_invoice(client.id, quote.id, address)
@@ -274,19 +296,19 @@ def invoice_reply(client, details):
 
 
 def whatsapp_reply(sender, body=""):
-    """Handle a WhatsApp message and return our reply and a file link (or None)."""
+    """Handle a WhatsApp message and return our Reply."""
     # Twilio writes WhatsApp numbers as "whatsapp:+447...", so take that off first.
     client = get_client_by_owner(sender.removeprefix("whatsapp:"))
     if client is None or not client.active:
-        return WHATSAPP_NOT_A_CLIENT, None
+        return Reply(WHATSAPP_NOT_A_CLIENT)
 
     command = body.strip().upper()
     if command == "ALERTS ON":
         set_whatsapp_alerts(client.id, True)
-        return "Done. Missed-call alerts will come here. Send ALERTS OFF for texts.", None
+        return Reply("Done. Missed-call alerts will come here. Send ALERTS OFF for texts.")
     if command == "ALERTS OFF":
         set_whatsapp_alerts(client.id, False)
-        return "Done. Missed-call alerts will come by text.", None
+        return Reply("Done. Missed-call alerts will come by text.")
     # The first word, so "QUOTE" can be followed by a space or a new line.
     if command.split()[:1] == ["QUOTE"]:
         return quote_reply(client, body.strip()[len("QUOTE"):])
@@ -294,7 +316,7 @@ def whatsapp_reply(sender, body=""):
         return invoice_reply(client, body.strip()[len("INVOICE"):])
     if command.split()[:1] == ["FINAL"]:
         return final_reply(client, command.removeprefix("FINAL").strip())
-    return f"Hi, it's Jack. {client.business_name} is connected to WhatsApp.", None
+    return Reply(f"Hi, it's Jack. {client.business_name} is connected to WhatsApp.")
 
 
 def forward_message(sender, body):
@@ -391,13 +413,40 @@ async def incoming_whatsapp(
     # A tapped button sends its title as Body, and the ID we gave it as ButtonPayload.
     # We make each ID a command, like "FINAL 6", so buttons and typing work the same.
     # Replying in the response sends it straight back through WhatsApp.
-    text, link = whatsapp_reply(From, ButtonPayload or Body)
+    reply = whatsapp_reply(From, ButtonPayload or Body)
     twiml = MessagingResponse()
-    message = twiml.message(text)
-    if link:
+    if reply.buttons:
+        reply = send_with_buttons(From, reply)
+        if reply is None:
+            # Already sent, so the response must be empty or Jack would reply twice.
+            return Response(content=str(twiml), media_type="application/xml")
+
+    message = twiml.message(reply.text)
+    if reply.link:
         # Twilio fetches the file from the link and sends it with the words.
-        message.media(link)
+        message.media(reply.link)
     return Response(content=str(twiml), media_type="application/xml")
+
+
+def send_with_buttons(to, reply):
+    """Send the PDF, then the words with buttons.
+
+    Return None if it all went, or what's left to send as a plain reply.
+    """
+    # Buttons can't go in a TwiML reply, so both are sent through Twilio's API,
+    # the PDF first so the buttons arrive underneath it.
+    template, quote_id = reply.buttons
+    pdf_sent = False
+    try:
+        if reply.link:
+            send_whatsapp(to, media_url=reply.link)
+            pdf_sent = True
+        send_whatsapp_buttons(to, template, {"1": reply.text, "2": str(quote_id)})
+        return None
+    except Exception as error:
+        # A plain reply is better than none, but don't send the PDF twice.
+        print(f"Buttons failed: {type(error).__name__}", flush=True)
+        return reply._replace(link=None) if pdf_sent else reply
 
 
 @app.get("/quotes/{quote_id}.pdf")

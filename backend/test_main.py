@@ -45,6 +45,8 @@ def use_fakes(monkeypatch, tmp_path, active=True, failing=()):
     monkeypatch.setattr(settings, "QUOTE_LINK_SECRET", None)
     # Tests must never reach the real AI, which costs money.
     monkeypatch.setattr(main, "read_quote", lambda details: None)
+    monkeypatch.setattr(settings, "WHATSAPP_DRAFT_BUTTONS", None)
+    monkeypatch.setattr(settings, "WHATSAPP_FINAL_BUTTONS", None)
     # The cleanup job must never reach the real Twilio account from a test.
     monkeypatch.setattr(main, "count_old_twilio_records", lambda cutoff: (0, 0))
 
@@ -715,7 +717,7 @@ def test_whatsapp_status_rejects_missing_signature(monkeypatch, tmp_path):
 def test_alerts_on_and_off_by_whatsapp(monkeypatch, tmp_path):
     use_fakes(monkeypatch, tmp_path)
 
-    text, link = main.whatsapp_reply(f"whatsapp:{OWNER}", " alerts on ")
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", " alerts on ")
     assert text.startswith("Done")
     assert link is None
     assert database.whatsapp_alerts_on(1) is True
@@ -756,10 +758,9 @@ def test_owner_can_save_a_quote_by_whatsapp(monkeypatch, tmp_path):
         f"whatsapp:{OWNER}", "quote Mrs Jones | Bathroom refit | BR | 1250.50"
     )
 
-    assert reply == (
+    assert reply == main.Reply(
         "Draft quote 1 saved: Bathroom refit for Mrs Jones, £1,250.50, 0 lines of work. "
-        "Check it, then send FINAL 1 for the version to send.",
-        None,
+        "Check it, then send FINAL 1 for the version to send."
     )
     assert database.get_quote(1).total_pence == 125050
 
@@ -769,7 +770,7 @@ def test_a_badly_written_quote_gets_help(monkeypatch, tmp_path):
 
     reply = main.whatsapp_reply(f"whatsapp:{OWNER}", "QUOTE bathroom about 1250")
 
-    assert reply == (main.QUOTE_HELP, None)
+    assert reply == main.Reply(main.QUOTE_HELP)
     assert database.get_quote(1) is None
 
 
@@ -780,7 +781,7 @@ def test_a_stranger_cant_make_a_quote(monkeypatch, tmp_path):
         f"whatsapp:{MOBILE_CALLER}", "QUOTE Mrs Jones | Bathroom | BR | 100"
     )
 
-    assert reply == (main.WHATSAPP_NOT_A_CLIENT, None)
+    assert reply == main.Reply(main.WHATSAPP_NOT_A_CLIENT)
     assert database.get_quote(1) is None
 
 
@@ -843,7 +844,7 @@ def test_a_quote_reply_links_to_its_pdf(monkeypatch, tmp_path):
     use_fakes(monkeypatch, tmp_path)
     monkeypatch.setattr(settings, "QUOTE_LINK_SECRET", "test-secret")
 
-    text, link = main.whatsapp_reply(
+    text, link, buttons = main.whatsapp_reply(
         f"whatsapp:{OWNER}", "QUOTE Mrs Jones | Bathroom refit | BR | 1250"
     )
 
@@ -865,7 +866,7 @@ def test_whatsapp_reply_attaches_the_pdf(monkeypatch, tmp_path):
 def test_a_quote_with_lines_by_whatsapp(monkeypatch, tmp_path):
     use_fakes(monkeypatch, tmp_path)
 
-    text, link = main.whatsapp_reply(
+    text, link, buttons = main.whatsapp_reply(
         f"whatsapp:{OWNER}",
         "QUOTE Mrs Jones | Bathroom refit | BR | 1250\n- Remove old suite\n- Fit basin",
     )
@@ -877,7 +878,7 @@ def test_a_quote_with_lines_by_whatsapp(monkeypatch, tmp_path):
 def test_quote_can_be_on_its_own_line(monkeypatch, tmp_path):
     use_fakes(monkeypatch, tmp_path)
 
-    text, link = main.whatsapp_reply(
+    text, link, buttons = main.whatsapp_reply(
         f"whatsapp:{OWNER}", "Quote\nMrs Jones | Bathroom refit | BR | 1250"
     )
 
@@ -895,7 +896,7 @@ def test_a_rough_quote_is_read_by_the_ai(monkeypatch, tmp_path):
     }
     monkeypatch.setattr(main, "read_quote", lambda details: quote)
 
-    text, link = main.whatsapp_reply(f"whatsapp:{OWNER}", "quote bathroom mrs jones 1250")
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "quote bathroom mrs jones 1250")
 
     assert text.startswith("Draft quote 1 saved: Bathroom refit for Mrs Jones")
     assert database.get_quote_lines(1) == ["Remove old suite"]
@@ -904,7 +905,7 @@ def test_a_rough_quote_is_read_by_the_ai(monkeypatch, tmp_path):
 def test_final_makes_a_quote_final(monkeypatch, tmp_path):
     use_quote_links(monkeypatch, tmp_path)
 
-    text, link = main.whatsapp_reply(f"whatsapp:{OWNER}", "final 1")
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "final 1")
 
     assert text == "Quote 1 is final. Forward this PDF to Mrs Jones."
     assert link.startswith(f"{settings.PUBLIC_URL}/quotes/1.pdf")
@@ -914,7 +915,7 @@ def test_final_makes_a_quote_final(monkeypatch, tmp_path):
 def test_final_needs_a_number(monkeypatch, tmp_path):
     use_quote_links(monkeypatch, tmp_path)
 
-    text, link = main.whatsapp_reply(f"whatsapp:{OWNER}", "FINAL one")
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "FINAL one")
 
     assert text.startswith("To finish a quote")
     assert link is None
@@ -924,7 +925,7 @@ def test_final_needs_a_number(monkeypatch, tmp_path):
 def test_final_for_a_quote_that_doesnt_exist(monkeypatch, tmp_path):
     use_quote_links(monkeypatch, tmp_path)
 
-    text, link = main.whatsapp_reply(f"whatsapp:{OWNER}", "FINAL 9")
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "FINAL 9")
 
     assert text == "There's no quote 9 for Test Plumbing."
     assert link is None
@@ -944,7 +945,7 @@ def test_a_client_cant_finish_another_clients_quote(monkeypatch, tmp_path):
         )
         session.commit()
 
-    text, link = main.whatsapp_reply(f"whatsapp:{other_owner}", "FINAL 1")
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{other_owner}", "FINAL 1")
 
     assert text == "There's no quote 1 for Other Plumbing."
     assert database.get_quote(1).status == "draft"
@@ -966,7 +967,7 @@ def use_final_quote(monkeypatch, tmp_path, with_details=True):
 def test_invoice_saves_an_invoice(monkeypatch, tmp_path):
     use_final_quote(monkeypatch, tmp_path)
 
-    text, link = main.whatsapp_reply(f"whatsapp:{OWNER}", "invoice 1" + ADDRESS)
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "invoice 1" + ADDRESS)
 
     assert text == "Invoice 1 saved for Mrs Jones, £1,250.50. Forward this PDF to them."
     assert link.startswith(f"{settings.PUBLIC_URL}/invoices/1.pdf?expires=")
@@ -979,7 +980,7 @@ def test_invoicing_a_quote_twice_gives_the_same_invoice(monkeypatch, tmp_path):
     use_final_quote(monkeypatch, tmp_path)
 
     main.whatsapp_reply(f"whatsapp:{OWNER}", "INVOICE 1" + ADDRESS)
-    text, link = main.whatsapp_reply(f"whatsapp:{OWNER}", "INVOICE 1" + ADDRESS)
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "INVOICE 1" + ADDRESS)
 
     assert text.startswith("Invoice 1 saved")
 
@@ -990,7 +991,7 @@ def test_invoice_numbers_go_up_by_one(monkeypatch, tmp_path):
     database.finish_quote(1, 2)
 
     main.whatsapp_reply(f"whatsapp:{OWNER}", "INVOICE 1" + ADDRESS)
-    text, link = main.whatsapp_reply(f"whatsapp:{OWNER}", "INVOICE 2" + ADDRESS)
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "INVOICE 2" + ADDRESS)
 
     assert text.startswith("Invoice 2 saved for Mr Smith, £85.00.")
 
@@ -998,7 +999,7 @@ def test_invoice_numbers_go_up_by_one(monkeypatch, tmp_path):
 def test_invoice_needs_an_address(monkeypatch, tmp_path):
     use_final_quote(monkeypatch, tmp_path)
 
-    text, link = main.whatsapp_reply(f"whatsapp:{OWNER}", "INVOICE 1")
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "INVOICE 1")
 
     assert text == main.INVOICE_HELP
     assert database.get_invoice_for_quote(1) is None
@@ -1007,7 +1008,7 @@ def test_invoice_needs_an_address(monkeypatch, tmp_path):
 def test_a_draft_cant_be_invoiced(monkeypatch, tmp_path):
     use_quote_links(monkeypatch, tmp_path)
 
-    text, link = main.whatsapp_reply(f"whatsapp:{OWNER}", "INVOICE 1" + ADDRESS)
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "INVOICE 1" + ADDRESS)
 
     assert text == "Quote 1 is still a draft. Send FINAL 1 first."
 
@@ -1018,7 +1019,7 @@ def test_invoice_without_business_details_alerts_james(monkeypatch, tmp_path):
     database.save_quote(1, "Mrs Jones", "Bathroom refit", "BR", 125050)
     database.finish_quote(1, 1)
 
-    text, link = main.whatsapp_reply(f"whatsapp:{OWNER}", "INVOICE 1" + ADDRESS)
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "INVOICE 1" + ADDRESS)
 
     assert text.startswith("Your invoice details aren't set up yet")
     assert texted_numbers == [JAMES]
@@ -1039,7 +1040,7 @@ def test_a_client_cant_invoice_another_clients_quote(monkeypatch, tmp_path):
         )
         session.commit()
 
-    text, link = main.whatsapp_reply(f"whatsapp:{other_owner}", "INVOICE 1" + ADDRESS)
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{other_owner}", "INVOICE 1" + ADDRESS)
 
     assert text == "There's no quote 1 for Other Plumbing."
     assert database.get_invoice_for_quote(1) is None
@@ -1063,3 +1064,53 @@ def test_a_tapped_button_runs_its_command(monkeypatch, tmp_path):
 
     assert "Quote 1 is final" in response.text
     assert database.get_quote(1).status == "final"
+
+
+def use_buttons(monkeypatch, failing=False):
+    """Turn button templates on, and return a list of WhatsApp messages "sent"."""
+    sent = []
+    monkeypatch.setattr(settings, "WHATSAPP_DRAFT_BUTTONS", "HX_DRAFT")
+    monkeypatch.setattr(settings, "WHATSAPP_FINAL_BUTTONS", "HX_FINAL")
+
+    def fake_send_whatsapp(to, body="", media_url=None):
+        sent.append(("pdf", media_url is not None))
+
+    def fake_send_whatsapp_buttons(to, template, variables):
+        if failing:
+            raise RuntimeError("Twilio is unhappy")
+        sent.append((template, variables["2"]))
+
+    monkeypatch.setattr(main, "send_whatsapp", fake_send_whatsapp)
+    monkeypatch.setattr(main, "send_whatsapp_buttons", fake_send_whatsapp_buttons)
+    return sent
+
+
+def test_a_draft_quote_gets_make_final_buttons(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+    sent = use_buttons(monkeypatch)
+
+    response = signed_whatsapp(OWNER, "QUOTE Mr Smith | Boiler service | BS | 85")
+
+    # The PDF first, then the buttons for the new quote, and nothing in the response.
+    assert sent == [("pdf", True), ("HX_DRAFT", "2")]
+    assert "<Message>" not in response.text
+
+
+def test_a_final_quote_gets_make_invoice_buttons(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+    sent = use_buttons(monkeypatch)
+
+    signed_whatsapp(OWNER, "FINAL 1")
+
+    assert sent == [("pdf", True), ("HX_FINAL", "1")]
+
+
+def test_a_plain_reply_if_buttons_fail(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+    use_buttons(monkeypatch, failing=True)
+
+    response = signed_whatsapp(OWNER, "FINAL 1")
+
+    # The PDF already went, so the plain reply is just the words.
+    assert "Quote 1 is final" in response.text
+    assert "<Media>" not in response.text

@@ -34,6 +34,29 @@ def send_whatsapp_alert(to: str, who: str, status: str) -> str:
     return message.sid
 
 
+def send_whatsapp(to: str, body: str = "", media_url: str | None = None) -> str:
+    """Send a WhatsApp message, maybe with a file, and return Twilio's message ID."""
+    # Only allowed inside the 24-hour window, which a reply always is.
+    message = client.messages.create(
+        to=to,
+        from_=f"whatsapp:{settings.WHATSAPP_NUMBER}",
+        body=body,
+        media_url=[media_url] if media_url else None,
+    )
+    return message.sid
+
+
+def send_whatsapp_buttons(to: str, template: str, variables: dict) -> str:
+    """Send a button template, filling its gaps, and return Twilio's message ID."""
+    message = client.messages.create(
+        to=to,
+        from_=f"whatsapp:{settings.WHATSAPP_NUMBER}",
+        content_sid=template,
+        content_variables=json.dumps(variables),
+    )
+    return message.sid
+
+
 def count_old_twilio_records(cutoff) -> tuple[int, int]:
     """Return how many messages and calls Twilio holds from before cutoff."""
     # A dry run: this only counts, so we can check the numbers before deleting anything.
