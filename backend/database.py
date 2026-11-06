@@ -1,4 +1,6 @@
+import hashlib
 import os
+import secrets
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import inspect, text
@@ -16,6 +18,9 @@ ALERT_WAIT_MINUTES = 2
 REPEAT_HOURS = 24
 # Jack forgets a question that hasn't been answered in this many hours.
 QUESTION_HOURS = 24
+# A login link works for this many minutes, and a login lasts this many days.
+LOGIN_LINK_MINUTES = 15
+SESSION_DAYS = 30
 
 
 class Client(SQLModel, table=True):
@@ -190,6 +195,26 @@ class AiCall(SQLModel, table=True):
     output_tokens: int
     seconds: float
     time: datetime = Field(default_factory=now_utc)
+
+
+class LoginLink(SQLModel, table=True):
+    """A one-time link that logs a client in to their page."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    # Only a hash of the link's secret part is kept, so a leaked database can't log anyone in.
+    token_hash: str = Field(unique=True, index=True)
+    client_id: int = Field(foreign_key="client.id")
+    expires_at: datetime
+    used_at: datetime | None = None
+
+
+class WebSession(SQLModel, table=True):
+    """A logged-in browser, kept as a hash of the cookie it holds."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    token_hash: str = Field(unique=True, index=True)
+    client_id: int = Field(foreign_key="client.id")
+    expires_at: datetime
 
 
 class PendingQuestion(SQLModel, table=True):
@@ -595,6 +620,78 @@ def everything_for(client_id):
             .order_by(Invoice.number)
         ).all()
     return {"jobs": jobs, "quotes": quotes, "invoices": invoices, "prices": get_prices(client_id)}
+
+
+def hash_token(token):
+    """Return the hash we store in place of a secret token."""
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def create_login_link(client_id):
+    """Save a new one-time login link for this client, and return its secret token."""
+    token = secrets.token_urlsafe(32)
+    with Session(engine) as session:
+        session.add(
+            LoginLink(
+                token_hash=hash_token(token),
+                client_id=client_id,
+                expires_at=now_utc() + timedelta(minutes=LOGIN_LINK_MINUTES),
+            )
+        )
+        session.commit()
+    return token
+
+
+def use_login_link(token):
+    """Use up a login link. Return its client ID, or None if it's unknown, used or expired."""
+    with Session(engine) as session:
+        statement = select(LoginLink).where(LoginLink.token_hash == hash_token(token))
+        link = session.exec(statement).first()
+        if link is None or link.used_at is not None or as_utc(link.expires_at) < now_utc():
+            return None
+        link.used_at = now_utc()
+        session.add(link)
+        session.commit()
+        return link.client_id
+
+
+def start_web_session(client_id):
+    """Log a browser in for SESSION_DAYS. Return the secret token for its cookie."""
+    token = secrets.token_urlsafe(32)
+    with Session(engine) as session:
+        session.add(
+            WebSession(
+                token_hash=hash_token(token),
+                client_id=client_id,
+                expires_at=now_utc() + timedelta(days=SESSION_DAYS),
+            )
+        )
+        session.commit()
+    return token
+
+
+def client_for_session(token):
+    """Return the active client logged in with this cookie, or None."""
+    if not token:
+        return None
+    with Session(engine) as session:
+        statement = select(WebSession).where(WebSession.token_hash == hash_token(token))
+        web_session = session.exec(statement).first()
+        if web_session is None or as_utc(web_session.expires_at) < now_utc():
+            return None
+        client = session.get(Client, web_session.client_id)
+        # A paused client can't use their page either.
+        return client if client is not None and client.active else None
+
+
+def end_web_session(token):
+    """Log this cookie out, if it's logged in."""
+    with Session(engine) as session:
+        statement = select(WebSession).where(WebSession.token_hash == hash_token(token or ""))
+        web_session = session.exec(statement).first()
+        if web_session is not None:
+            session.delete(web_session)
+            session.commit()
 
 
 def get_job(job_id):

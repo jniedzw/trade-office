@@ -57,6 +57,8 @@ backend/
   main.py          # FastAPI app and endpoints
   whatsapp.py      # Jack's WhatsApp commands and replies
   alerts.py        # send texts safely and alert me when something fails
+  web.py           # the tradesperson's own web pages and login
+  templates/       # the HTML for those pages
   database.py      # SQLModel tables (clients, calls, jobs, quotes, invoices) and lookups
   sms.py           # send_sms() using the Twilio client
   quotes.py        # read typed quotes, money and dates, signed download links

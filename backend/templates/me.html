@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}{{ client.business_name }} · Ask Jack{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Hi, it's Jack</h1>
+  <p>You're logged in as {{ client.business_name }}. Your jobs, customers and money will show here.</p>
+</div>
+<form method="post" action="/logout">
+  <button class="quiet" type="submit">Log out</button>
+</form>
+{% endblock %}

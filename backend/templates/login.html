@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Log in · Ask Jack{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Log in to your page</h1>
+  <p class="muted">Tap below to log in on this phone for 30 days.</p>
+  {# A form, not a plain link, so WhatsApp's link previews can't use the login up. #}
+  <form method="post">
+    <button type="submit">Log in</button>
+  </form>
+</div>
+{% endblock %}

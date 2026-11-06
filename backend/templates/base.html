@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {# Private pages: keep them out of search engines. #}
+  <meta name="robots" content="noindex">
+  <title>{% block title %}Ask Jack{% endblock %}</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; background: #f6f6f4; color: #1a1a1a; }
+    header { background: #1a1a1a; color: #fff; padding: 16px; }
+    main { max-width: 640px; margin: 0 auto; padding: 16px; }
+    .card { background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+    button { font: inherit; font-weight: 600; border: 0; border-radius: 10px; padding: 14px 20px;
+             background: #b8975a; color: #fff; width: 100%; cursor: pointer; }
+    .quiet { background: none; color: #666; width: auto; padding: 8px 0; text-decoration: underline; }
+    .muted { color: #666; }
+  </style>
+</head>
+<body>
+  <header><strong>Ask Jack</strong>{% if client %} · {{ client.business_name }}{% endif %}</header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

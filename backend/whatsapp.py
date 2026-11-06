@@ -11,6 +11,7 @@ import settings
 from ai import change_quote, read_booking, read_job, read_quote
 from alerts import alert_james
 from database import (
+    create_login_link,
     ask_question,
     book_job,
     booked_jobs,
@@ -210,7 +211,7 @@ def is_new_command(command):
     to 1300"), so only messages that can't be an answer count as commands.
     """
     words = command.split()
-    if command in ("ALERTS ON", "ALERTS OFF", "PRICES", "HELP", "OWED", "PAID", "WEEK", "EXPORT"):
+    if command in ("ALERTS ON", "ALERTS OFF", "PRICES", "HELP", "OWED", "PAID", "WEEK", "EXPORT", "PAGE"):
         return True
     if words[:1] in (["QUOTE"], ["LOG"], ["BOOK"]):
         return True
@@ -437,6 +438,15 @@ def week_reply(client):
     return Reply(f"Your week:\n{week}" if week else "Nothing booked for the next 7 days.")
 
 
+def page_reply(client):
+    """Send the client a one-time link to log in to their page."""
+    token = create_login_link(client.id)
+    return Reply(
+        f"Here's your page: {settings.PUBLIC_URL}/login/{token}\n"
+        "The link works once, for 15 minutes. Don't forward it: it logs in as you."
+    )
+
+
 def export_reply(client):
     """Send the client all their data as a spreadsheet."""
     if not settings.QUOTE_LINK_SECRET:
@@ -474,6 +484,7 @@ COMMANDS = {
     "BOOK": lambda client, rest: book_reply(client, rest),
     "WEEK": lambda client, rest: week_reply(client),
     "EXPORT": lambda client, rest: export_reply(client),
+    "PAGE": lambda client, rest: page_reply(client),
 }
 
 
