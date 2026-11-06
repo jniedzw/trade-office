@@ -76,6 +76,7 @@ backend/
   list_clients.py  # show every client
   update_client.py # change a client's details, or pause them
   set_business_details.py  # a client's legal name, address and bank details
+  delete_client.py # delete a client who's leaving, and all their records
   add_skip_numbers.py  # add a client's family and friends (never texted)
   seed.py          # add two fake clients for local testing
   requirements.txt

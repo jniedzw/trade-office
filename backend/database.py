@@ -3,7 +3,7 @@ import os
 import secrets
 from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import inspect, text
+from sqlalchemy import delete, inspect, text, update
 from sqlmodel import Field, Session, SQLModel, UniqueConstraint, create_engine, select
 
 # A local SQLite file unless .env says otherwise (on Render it's on the persistent disk).
@@ -873,3 +873,29 @@ def opt_in(client_id, number):
         if row is not None:
             session.delete(row)
             session.commit()
+
+
+def delete_client(client_id):
+    """Delete a client and everything they own, in one go. Return the rows deleted per table.
+
+    Every table with a client_id is found automatically, so a table added later
+    can't be forgotten. AI cost logs hold no personal data, so they're kept but
+    unlinked from the client.
+    """
+    tables = SQLModel.metadata.tables
+    counts = {}
+    with Session(engine) as session:
+        quote_ids = select(Quote.id).where(Quote.client_id == client_id)
+        # Quote lines belong to quotes, not clients, so they go first.
+        lines = session.exec(delete(QuoteLine).where(QuoteLine.quote_id.in_(quote_ids)))
+        counts["quoteline"] = lines.rowcount
+        session.exec(update(AiCall).where(AiCall.client_id == client_id).values(client_id=None))
+        # Invoices point at quotes, so they go before them.
+        owned = [name for name, table in tables.items() if "client_id" in table.columns and name != "aicall"]
+        for name in sorted(owned, key=lambda name: name != "invoice"):
+            table = tables[name]
+            counts[name] = session.exec(delete(table).where(table.c.client_id == client_id)).rowcount
+        counts["client"] = session.exec(delete(Client).where(Client.id == client_id)).rowcount
+        # One commit: either everything goes, or nothing does.
+        session.commit()
+    return counts
