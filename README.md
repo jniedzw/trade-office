@@ -55,14 +55,16 @@ sequenceDiagram
 ```
 backend/
   main.py          # FastAPI app and endpoints
-  database.py      # SQLModel tables (clients, calls, quotes) and lookups
+  whatsapp.py      # Jack's WhatsApp commands and replies
+  alerts.py        # send texts safely and alert me when something fails
+  database.py      # SQLModel tables (clients, calls, jobs, quotes, invoices) and lookups
   sms.py           # send_sms() using the Twilio client
   quotes.py        # read typed quotes, money and dates, signed download links
-  pdfs.py          # make quote PDFs in the client's colours
+  pdfs.py          # make quote and invoice PDFs in the client's colours
   menu.py          # the WhatsApp Options menu and help text
   diary.py         # bookings in UK time and the week ahead
-  ai.py            # read rough quote messages with Claude
-  eval_quotes.py   # check the AI against 20 made-up messages (costs a few pence)
+  ai.py            # read rough messages (quotes, jobs, bookings) with Claude
+  eval_quotes.py   # check the AI against 27 made-up quote messages (costs about 25p)
   eval_bookings.py # check the AI's reading of dates and times (costs about 1p)
   ai_costs.py      # what the AI cost in the last 30 days, per client
   settings.py      # app-wide settings read from .env
