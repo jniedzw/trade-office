@@ -63,6 +63,7 @@ backend/
   diary.py         # bookings in UK time and the week ahead
   ai.py            # read rough quote messages with Claude
   eval_quotes.py   # check the AI against 20 made-up messages (costs a few pence)
+  eval_bookings.py # check the AI's reading of dates and times (costs about 1p)
   ai_costs.py      # what the AI cost in the last 30 days, per client
   settings.py      # app-wide settings read from .env
   add_client.py    # add a real client by answering questions
