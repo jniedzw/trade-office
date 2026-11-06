@@ -50,24 +50,41 @@ def days_of(job):
     return [first + timedelta(days=n) for n in range((last - first).days + 1)]
 
 
-def week_ahead(jobs, today):
-    """Return the next 7 days' booked jobs as text, grouped by day, or None if there are none."""
-    days = [today + timedelta(days=n) for n in range(7)]
-    lines = []
-    for day in days:
+def week_days(jobs, today):
+    """Return the next 7 days that have jobs, as (day, [(start time or "", job), ...]).
+
+    Shared by the WhatsApp week and the web page, so both always agree.
+    """
+    week = []
+    for day in [today + timedelta(days=n) for n in range(7)]:
         todays = sorted(
             (job for job in jobs if job.starts_at and day in days_of(job)),
             key=lambda job: to_uk(job.starts_at).time(),
         )
-        if not todays:
-            continue
-        lines.append(f"{day:%a} {day.day} {day:%b}")
-        for job in todays:
-            start = to_uk(job.starts_at)
-            # The start time only shows on the first day, and only if one was set.
-            at = f"{clock(start)} " if start.date() == day and start.time() != NO_TIME else ""
+        if todays:
+            week.append((day, [(start_on(job, day), job) for job in todays]))
+    return week
+
+
+def start_on(job, day):
+    """Return a job's start time, like "9am", but only on its first day and only if it has one."""
+    start = to_uk(job.starts_at)
+    return clock(start) if start.date() == day and start.time() != NO_TIME else ""
+
+
+def day_name(day):
+    """Return a day like "Mon 9 Nov"."""
+    return f"{day:%a} {day.day} {day:%b}"
+
+
+def week_ahead(jobs, today):
+    """Return the next 7 days' booked jobs as text, grouped by day, or None if there are none."""
+    lines = []
+    for day, todays in week_days(jobs, today):
+        lines.append(day_name(day))
+        for at, job in todays:
             where = f" ({job.address.splitlines()[0]})" if job.address else ""
-            lines.append(f"  {at}{job.customer_name}: {job.work}{where}")
+            lines.append(f"  {at + ' ' if at else ''}{job.customer_name}: {job.work}{where}")
     return "\n".join(lines) if lines else None
 
 

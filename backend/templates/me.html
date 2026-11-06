@@ -1,10 +1,33 @@
 {% extends "base.html" %}
-{% block title %}{{ client.business_name }} · Ask Jack{% endblock %}
+{% block title %}Today · {{ client.business_name }}{% endblock %}
 {% block content %}
+<h2>Today, {{ day_name(today) }}</h2>
 <div class="card">
-  <h1>Hi, it's Jack</h1>
-  <p>You're logged in as {{ client.business_name }}. Your jobs, customers and money will show here.</p>
+  {% for at, job in todays %}
+    {% include "job.html" %}
+  {% else %}
+    <p class="muted">Nothing booked today.</p>
+  {% endfor %}
 </div>
+
+<h2>Coming up</h2>
+<div class="card">
+  {% for day, jobs in coming_up %}
+    <p><strong>{{ day_name(day) }}</strong></p>
+    {% for at, job in jobs %}
+      {% include "job.html" %}
+    {% endfor %}
+  {% else %}
+    <p class="muted">Nothing booked for the rest of the week.</p>
+  {% endfor %}
+</div>
+
+{% if owed %}
+<div class="card">
+  <p>You're owed <strong>{{ owed }}</strong>. <a href="/money">See who owes you</a></p>
+</div>
+{% endif %}
+
 <form method="post" action="/logout">
   <button class="quiet" type="submit">Log out</button>
 </form>

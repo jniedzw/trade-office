@@ -694,6 +694,28 @@ def end_web_session(token):
             session.commit()
 
 
+def customers_for(client_id):
+    """Return this client's customers, from their jobs and quotes, most recent first.
+
+    Each is a dict: name, phone, address, how many jobs, and when we last saw them.
+    """
+    data = everything_for(client_id)
+    customers = {}
+    # Oldest first, so the newest phone number and address win.
+    records = sorted(data["jobs"] + data["quotes"], key=lambda record: as_utc(record.time))
+    for record in records:
+        key = record.customer_name.strip().lower()
+        customer = customers.setdefault(
+            key, {"name": record.customer_name, "phone": None, "address": None, "jobs": 0}
+        )
+        if isinstance(record, Job):
+            customer["jobs"] += 1
+            customer["phone"] = record.customer_phone or customer["phone"]
+            customer["address"] = record.address or customer["address"]
+        customer["last_seen"] = as_utc(record.time)
+    return sorted(customers.values(), key=lambda customer: customer["last_seen"], reverse=True)
+
+
 def get_job(job_id):
     """Return the job with this ID, or None."""
     with Session(engine) as session:

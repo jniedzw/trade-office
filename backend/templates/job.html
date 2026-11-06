@@ -1,0 +1,11 @@
+{# One booked job. Expects "at" (its start time, or "") and "job". #}
+<div class="job">
+  <span class="time">{{ at }}</span>
+  <strong>{{ job.customer_name }}</strong>: {{ job.work }}
+  {% if job.address %}
+    <br><a href="https://www.google.com/maps/search/?api=1&query={{ job.address | replace('\n', ', ') | urlencode }}">{{ job.address | replace('\n', ', ') }}</a>
+  {% endif %}
+  {% if job.customer_phone %}
+    <br><a href="tel:{{ job.customer_phone }}">{{ job.customer_phone }}</a>
+  {% endif %}
+</div>

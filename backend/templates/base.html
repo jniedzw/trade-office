@@ -15,10 +15,27 @@
              background: #b8975a; color: #fff; width: 100%; cursor: pointer; }
     .quiet { background: none; color: #666; width: auto; padding: 8px 0; text-decoration: underline; }
     .muted { color: #666; }
+    nav { margin-top: 10px; display: flex; gap: 16px; }
+    nav a { color: #b8975a; text-decoration: none; font-weight: 600; }
+    h2 { font-size: 1rem; margin: 24px 0 8px; }
+    .job { padding: 10px 0; border-top: 1px solid #eee; }
+    .job:first-of-type { border-top: 0; }
+    .time { font-weight: 600; display: inline-block; min-width: 56px; }
+    .job a { color: #1a1a1a; }
+    .late { color: #b3261e; font-weight: 600; }
   </style>
 </head>
 <body>
-  <header><strong>Ask Jack</strong>{% if client %} · {{ client.business_name }}{% endif %}</header>
+  <header>
+    <strong>Ask Jack</strong>{% if client %} · {{ client.business_name }}{% endif %}
+    {% if client %}
+    <nav>
+      <a href="/me">Today</a>
+      <a href="/customers">Customers</a>
+      <a href="/money">Money</a>
+    </nav>
+    {% endif %}
+  </header>
   <main>
     {% block content %}{% endblock %}
   </main>

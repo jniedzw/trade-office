@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Customers · {{ client.business_name }}{% endblock %}
+{% block content %}
+<h2>Customers</h2>
+<div class="card">
+  {% for customer in customers %}
+  <div class="job">
+    <strong>{{ customer.name }}</strong>
+    <span class="muted">· {{ customer.jobs }} job{{ "" if customer.jobs == 1 else "s" }} · last {{ day_name(customer.last_seen) }}</span>
+    {% if customer.address %}
+      <br><a href="https://www.google.com/maps/search/?api=1&query={{ customer.address | replace('\n', ', ') | urlencode }}">{{ customer.address | replace('\n', ', ') }}</a>
+    {% endif %}
+    {% if customer.phone %}
+      <br><a href="tel:{{ customer.phone }}">{{ customer.phone }}</a>
+    {% endif %}
+  </div>
+  {% else %}
+  <p class="muted">No customers yet. Log a job on WhatsApp and they'll show here.</p>
+  {% endfor %}
+</div>
+{% endblock %}
