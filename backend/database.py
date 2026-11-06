@@ -106,6 +106,8 @@ class Quote(SQLModel, table=True):
     time: datetime = Field(default_factory=now_utc)
     # The job it was quoted from, or None for a quote made straight away.
     job_id: int | None = None
+    # Each client's quotes are numbered 1, 2, 3..., shown as Q1, Q2, Q3.
+    number: int | None = None
 
 
 class QuoteLine(SQLModel, table=True):
@@ -134,6 +136,8 @@ class BusinessDetails(SQLModel, table=True):
     brand_colour: str = "#b8975a"
     # A phone number or email for customers, shown on quotes and invoices.
     contact: str = ""
+    # The number of their first Ask Jack invoice, so it carries on from their own.
+    invoice_start: int = 1
 
 
 class Invoice(SQLModel, table=True):
@@ -169,6 +173,8 @@ class Job(SQLModel, table=True):
     # When it's booked for, saved in UTC, and the last day of a job that runs over days.
     starts_at: datetime | None = None
     ends_on: date | None = None
+    # Each client's jobs are numbered 1, 2, 3..., shown as J1, J2, J3.
+    number: int | None = None
 
 
 class PriceItem(SQLModel, table=True):
@@ -239,6 +245,9 @@ NEW_COLUMNS = [
     ("job", "starts_at", "DATETIME"),
     ("job", "ends_on", "DATE"),
     ("client", "markup_percent", "INTEGER NOT NULL DEFAULT 0"),
+    ("job", "number", "INTEGER"),
+    ("quote", "number", "INTEGER"),
+    ("businessdetails", "invoice_start", "INTEGER NOT NULL DEFAULT 1"),
 ]
 
 
@@ -256,6 +265,26 @@ def create_tables():
     """Create any tables that don't exist yet, then add any new columns."""
     SQLModel.metadata.create_all(engine)
     add_missing_columns()
+    number_old_rows()
+
+
+def next_number(session, model, client_id):
+    """Return the client's next number for a job or quote: their highest so far, plus 1."""
+    numbers = session.exec(select(model.number).where(model.client_id == client_id)).all()
+    return max((n for n in numbers if n is not None), default=0) + 1
+
+
+def number_old_rows():
+    """Give a number to any job or quote saved before numbers existed, in the order they were made."""
+    with Session(engine) as session:
+        for model in (Job, Quote):
+            rows = session.exec(select(model).where(model.number == None).order_by(model.id)).all()  # noqa: E711
+            for row in rows:
+                row.number = next_number(session, model, row.client_id)
+                session.add(row)
+                # flush, so the next row's next_number sees this one.
+                session.flush()
+        session.commit()
 
 
 def get_client_by_number(twilio_number):
@@ -352,6 +381,7 @@ def save_quote(client_id, customer_name, title, job_code, total_pence, lines=(),
         job_id=job_id,
     )
     with Session(engine) as session:
+        quote.number = next_number(session, Quote, client_id)
         session.add(quote)
         # flush sends the quote to the database without committing, so it gets an ID
         # the lines can point to. One commit then saves all of it, or none of it.
@@ -432,8 +462,10 @@ def save_invoice(client_id, quote_id, customer_address):
     """Save an invoice with the client's next invoice number, and return it."""
     with Session(engine) as session:
         numbers = session.exec(select(Invoice.number).where(Invoice.client_id == client_id))
-        # Invoice numbers must run in order with no gaps, so take the next one up.
-        number = max(numbers, default=0) + 1
+        details = session.exec(select(BusinessDetails).where(BusinessDetails.client_id == client_id)).first()
+        # Invoice numbers must run in order with no gaps, so take the next one up,
+        # starting from the client's own next number if they already sent invoices.
+        number = max(max(numbers, default=0) + 1, details.invoice_start if details else 1)
         invoice = Invoice(
             client_id=client_id,
             quote_id=quote_id,
@@ -555,6 +587,7 @@ def save_job(client_id, customer_name, work, customer_phone=None, address=None):
         address=address,
     )
     with Session(engine) as session:
+        job.number = next_number(session, Job, client_id)
         session.add(job)
         session.commit()
         session.refresh(job)
@@ -714,6 +747,35 @@ def customers_for(client_id):
             customer["address"] = record.address or customer["address"]
         customer["last_seen"] = as_utc(record.time)
     return sorted(customers.values(), key=lambda customer: customer["last_seen"], reverse=True)
+
+
+def get_job_by_number(client_id, number):
+    """Return this client's job with this number (J4 is 4), or None."""
+    with Session(engine) as session:
+        statement = select(Job).where(Job.client_id == client_id, Job.number == number)
+        return session.exec(statement).first()
+
+
+def get_quote_by_number(client_id, number):
+    """Return this client's quote with this number (Q12 is 12), or None."""
+    with Session(engine) as session:
+        statement = select(Quote).where(Quote.client_id == client_id, Quote.number == number)
+        return session.exec(statement).first()
+
+
+def quotes_for_customer(client_id, name):
+    """Return this client's quotes for a customer, newest first. Ignores capitals."""
+    with Session(engine) as session:
+        quotes = session.exec(
+            select(Quote).where(Quote.client_id == client_id).order_by(Quote.id.desc())
+        ).all()
+    return [quote for quote in quotes if same_customer(quote.customer_name, name)]
+
+
+def same_customer(saved_name, typed_name):
+    """Return True if a typed name, like "mrs jones" or "jones", matches a saved one."""
+    saved, typed = saved_name.strip().lower(), typed_name.strip().lower()
+    return typed != "" and (saved == typed or typed in saved)
 
 
 def get_job(job_id):

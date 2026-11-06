@@ -10,7 +10,7 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-from quotes import money, reference, uk_date
+from quotes import invoice_label, money, reference, uk_date
 
 DARK = colors.HexColor("#1a1a1a")
 GREY = colors.HexColor("#666666")
@@ -160,8 +160,8 @@ def build(title, page, content):
 
 def quote_reference(quote, letters):
     """Return a quote's reference, like DPL-BR-041126-7."""
-    # The quote's ID on the end keeps two jobs on the same day apart.
-    return f"{reference(letters, quote.job_code, quote.time)}-{quote.id}"
+    # The quote's number (Q7 is 7) on the end keeps two jobs on the same day apart.
+    return f"{reference(letters, quote.job_code, quote.time)}-{quote.number or quote.id}"
 
 
 def make_invoice_pdf(invoice, quote, business_name, lines, details):
@@ -170,7 +170,8 @@ def make_invoice_pdf(invoice, quote, business_name, lines, details):
     Unlike a quote, an invoice always needs details, for the bank details.
     """
     accent = colors.HexColor(details.brand_colour)
-    number = f"INV-{details.ref_letters}-{invoice.number:04}"
+    # The same label Jack uses on WhatsApp, so the tradesperson and customer see one number.
+    number = invoice_label(invoice.number)
     due = uk_date(invoice.time + timedelta(days=details.payment_days))
     page = {
         "accent": accent,

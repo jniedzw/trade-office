@@ -11,6 +11,10 @@ import settings
 from ai import change_quote, read_booking, read_job, read_quote
 from alerts import alert_james
 from database import (
+    get_job_by_number,
+    get_quote_by_number,
+    quotes_for_customer,
+    same_customer,
     create_login_link,
     ask_question,
     book_job,
@@ -40,7 +44,18 @@ from database import (
 )
 from diary import uk_now, week_ahead, when
 from menu import HELP_TEXT, MENU_TEXT, command_for_title
-from quotes import QUOTE_HELP, money, parse_job, parse_quote, signed_link, to_pence
+from quotes import (
+    QUOTE_HELP,
+    invoice_label,
+    job_label,
+    money,
+    parse_job,
+    parse_quote,
+    quote_label,
+    read_number,
+    signed_link,
+    to_pence,
+)
 from sms import send_whatsapp, send_whatsapp_buttons
 
 # Far more quotes than a tradesperson makes in a day, so only a fault or misuse hits it.
@@ -79,10 +94,10 @@ def quote_reply(client, details):
         # 0 because there's no quote yet for the question to be about.
         ask_question(client.id, "new_quote", 0)
         return Reply("Tell me about the job: who it's for, the work, and the price.")
-    # "QUOTE JOB 4", as sent by the Quote it button under a logged job.
-    words = details.split()
-    if len(words) == 2 and words[0].upper() == "JOB" and words[1].isdigit():
-        return quote_job_reply(client, int(words[1]))
+    # "QUOTE J4", or "QUOTE JOB 4" as sent by the Quote it button under a logged job.
+    job_number = read_number(details, ("JOB", "J"), need_prefix=True)
+    if job_number is not None:
+        return quote_job_reply(client, job_number)
     # A cap, so a fault or misuse can't run up a big AI bill.
     if count_quotes_today(client.id) >= MAX_QUOTES_PER_DAY:
         alert_james(client, "hit the daily quote limit.")
@@ -96,11 +111,11 @@ def quote_reply(client, details):
     return draft_reply(save_quote(client.id, **quote), quote)
 
 
-def quote_job_reply(client, job_id):
+def quote_job_reply(client, number):
     """Ask for the price and work for a logged job, so it can be quoted."""
-    job = get_job(job_id)
-    if job is None or job.client_id != client.id:
-        return Reply(f"There's no job {job_id} for {client.business_name}.")
+    job = get_job_by_number(client.id, number)
+    if job is None:
+        return Reply(f"There's no job {job_label(number)} for {client.business_name}.")
     ask_question(client.id, "quote_job", job.id)
     return Reply(f"What's the price for {job.customer_name}'s job ({job.work}), and the work to list?")
 
@@ -127,14 +142,42 @@ def quote_from_job(client, job_id, answer):
 
 def draft_reply(quote_id, quote):
     """Return the reply for a newly saved draft quote, with its PDF and buttons."""
+    number = get_quote(quote_id).number
     count = len(quote["lines"])
     lines = "1 line" if count == 1 else f"{count} lines"
     text = (
-        f"Draft quote {quote_id} saved: {quote['title']} for "
+        f"Draft quote {quote_label(number)} saved: {quote['title']} for "
         f"{quote['customer_name']}, {money(quote['total_pence'])}, {lines} of work. "
-        f"Check it, then send FINAL {quote_id} for the version to send."
+        f"Check it, then send FINAL {quote_label(number)} for the version to send."
     )
-    return with_pdf(text, "quote", quote_id, buttons_for(settings.WHATSAPP_DRAFT_BUTTONS, quote_id))
+    return with_pdf(text, "quote", quote_id, buttons_for(settings.WHATSAPP_DRAFT_BUTTONS, number))
+
+
+def find_quote(client, ref, status):
+    """Find a client's quote from what they typed: a number like Q12, or a customer's name.
+
+    Return (quote, None), or (None, a Reply saying what's wrong), or (None, None) if
+    they typed nothing. A name only matches quotes with this status, like "final".
+    """
+    ref = ref.strip()
+    if ref == "":
+        return None, None
+    number = read_number(ref, ("Q",))
+    if number is not None:
+        quote = get_quote_by_number(client.id, number)
+        if quote is None:
+            return None, Reply(f"There's no quote {quote_label(number)} for {client.business_name}.")
+        return quote, None
+    quotes = [quote for quote in quotes_for_customer(client.id, ref) if quote.status == status]
+    if not quotes:
+        return None, Reply(f"There's no {status} quote for {ref}.")
+    if len(quotes) > 1:
+        # More than one match: list them and let the tradesperson pick, rather than guess.
+        choices = ", ".join(
+            f"{quote_label(quote.number)} ({quote.title}, {money(quote.total_pence)})" for quote in quotes[:5]
+        )
+        return None, Reply(f"{ref} has more than one {status} quote: {choices}. Which one? Send its number.")
+    return quotes[0], None
 
 
 def with_pdf(text, kind, item_id, buttons=None):
@@ -145,22 +188,31 @@ def with_pdf(text, kind, item_id, buttons=None):
     return Reply(text, signed_link(kind, item_id, now_utc()), buttons)
 
 
-def final_reply(client, number):
+def final_reply(client, ref):
     """Make a quote final and return our reply and a link to the clean PDF."""
-    if not number.isdigit():
-        return Reply("To finish a quote, send FINAL and its number, like FINAL 3.")
-    quote = finish_quote(client.id, int(number))
+    quote, problem = find_quote(client, ref, "draft")
+    if problem:
+        return problem
     if quote is None:
-        return Reply(f"There's no quote {number} for {client.business_name}.")
+        return Reply("To finish a quote, send FINAL and its number or the customer's name, like FINAL Q3.")
+    finish_quote(client.id, quote.id)
     return with_pdf(
-        f"Quote {quote.id} is final. Forward this PDF to {quote.customer_name}.",
+        f"Quote {quote_label(quote.number)} is final. Forward this PDF to {quote.customer_name}.",
         "quote",
         quote.id,
-        buttons_for(settings.WHATSAPP_FINAL_BUTTONS, quote.id),
+        buttons_for(settings.WHATSAPP_FINAL_BUTTONS, quote.number),
     )
 
 
-INVOICE_HELP = "To make an invoice, send INVOICE, the quote number, then the customer's address:\nINVOICE 3\n12 Elm Road\nLiverpool L1 0AA"
+INVOICE_HELP = (
+    "To make an invoice, send INVOICE and the quote's number or the customer's name, "
+    "then their address if Jack doesn't have it:\nINVOICE Q3\n12 Elm Road\nLiverpool L1 0AA"
+)
+
+
+def address_from(lines):
+    """Return address lines tidied up and joined, one part per line."""
+    return "\n".join(line.strip() for line in lines if line.strip())
 
 
 def invoice_reply(client, details):
@@ -169,16 +221,19 @@ def invoice_reply(client, details):
     With no address, as when the tradesperson taps Make invoice, Jack asks for one.
     """
     first_line, *address_lines = details.strip().splitlines() or [""]
-    number = first_line.strip()
-    address = "\n".join(line.strip() for line in address_lines if line.strip())
-    if not number.isdigit():
+    quote, problem = find_quote(client, first_line, "final")
+    if problem:
+        return problem
+    if quote is None:
         return Reply(INVOICE_HELP)
+    return invoice_for(client, quote, address_from(address_lines))
 
-    quote = get_quote(int(number))
-    if quote is None or quote.client_id != client.id:
-        return Reply(f"There's no quote {number} for {client.business_name}.")
+
+def invoice_for(client, quote, address):
+    """Make the invoice for one of the client's quotes, asking for the address if needed."""
+    label = quote_label(quote.number)
     if quote.status != "final":
-        return Reply(f"Quote {number} is still a draft. Send FINAL {number} first.")
+        return Reply(f"Quote {label} is still a draft. Send FINAL {label} first.")
     # Bank details come from here, and an invoice without them can't be paid.
     if get_business_details(client.id) is None:
         alert_james(client, "tried to invoice without business details.")
@@ -197,7 +252,7 @@ def invoice_reply(client, details):
     # Sending INVOICE twice for one quote gives the same invoice, not a second one.
     invoice = get_invoice_for_quote(quote.id) or save_invoice(client.id, quote.id, address)
     text = (
-        f"Invoice {invoice.number} saved for {quote.customer_name}, "
+        f"Invoice {invoice_label(invoice.number)} saved for {quote.customer_name}, "
         f"{money(quote.total_pence)}. Forward this PDF to them."
     )
     return with_pdf(text, "invoice", invoice.id)
@@ -215,8 +270,11 @@ def is_new_command(command):
         return True
     if words[:1] in (["QUOTE"], ["LOG"], ["BOOK"]):
         return True
-    # FINAL 6, INVOICE 6 and CHANGE 6 need a quote number straight after.
-    return words[:1] in (["FINAL"], ["INVOICE"], ["CHANGE"], ["PAID"]) and words[1:2] != [] and words[1].isdigit()
+    # FINAL Q6, INVOICE Q6, CHANGE Q6 and PAID INV-0244 need a number straight after.
+    # A name ("final price 1300") could be part of an answer, so only numbers count here.
+    if words[:1] in (["FINAL"], ["INVOICE"], ["CHANGE"], ["PAID"]) and len(words) > 1:
+        return read_number(words[1], ("INVOICE", "INV", "Q")) is not None
+    return False
 
 PRICE_HELP = (
     "To save a price, send PRICE, the job and the price, like:\nPRICE boiler service 85\n"
@@ -260,7 +318,7 @@ def markup_reply(client, details):
     return Reply(f"Saved: {percent}% added to materials on your quotes.")
 
 
-CHANGE_HELP = "To change a quote, send CHANGE, its number and what to change, like:\nCHANGE 3 price is 1300"
+CHANGE_HELP = "To change a quote, send CHANGE, its number and what to change, like:\nCHANGE Q3 price is 1300"
 
 
 def change_reply(client, details):
@@ -268,42 +326,50 @@ def change_reply(client, details):
 
     With nothing to change, as when the tradesperson taps Change, Jack asks what to change.
     """
-    number, _, change = details.strip().partition(" ")
-    if not number.isdigit():
+    ref, _, change = details.strip().partition(" ")
+    number = read_number(ref, ("Q",))
+    if number is None:
         return Reply(CHANGE_HELP)
-    quote = get_quote(int(number))
-    if quote is None or quote.client_id != client.id:
-        return Reply(f"There's no quote {number} for {client.business_name}.")
+    quote = get_quote_by_number(client.id, number)
+    if quote is None:
+        return Reply(f"There's no quote {quote_label(number)} for {client.business_name}.")
+    return change_for(client, quote, change)
+
+
+def change_for(client, quote, change):
+    """Change one of the client's quotes, or ask what to change if they didn't say."""
+    label = quote_label(quote.number)
     # The invoice is made from the quote, so changing it would change the invoice.
     if get_invoice_for_quote(quote.id) is not None:
-        return Reply(f"Quote {number} has been invoiced, so it can't change. Send a new QUOTE instead.")
+        return Reply(f"Quote {label} has been invoiced, so it can't change. Send a new QUOTE instead.")
     if change.strip() == "":
         ask_question(client.id, "change", quote.id)
-        return Reply(f"What needs changing on quote {number}?")
+        return Reply(f"What needs changing on quote {label}?")
 
     changed = change_quote(quote, get_quote_lines(quote.id), change)
     if changed is None:
         return Reply(
             f"Sorry, I couldn't make that change. If it's a new price, include it, "
-            f"like: CHANGE {number} price is 1300"
+            f"like: CHANGE {label} price is 1300"
         )
     update_quote(quote.id, **changed)
     count = len(changed["lines"])
     lines = "1 line" if count == 1 else f"{count} lines"
     text = (
-        f"Draft quote {quote.id} changed: {changed['title']} for {changed['customer_name']}, "
+        f"Draft quote {label} changed: {changed['title']} for {changed['customer_name']}, "
         f"{money(changed['total_pence'])}, {lines} of work."
     )
-    return with_pdf(text, "quote", quote.id, buttons_for(settings.WHATSAPP_DRAFT_BUTTONS, quote.id))
+    return with_pdf(text, "quote", quote.id, buttons_for(settings.WHATSAPP_DRAFT_BUTTONS, quote.number))
 
 
 def answer_question(client, question, answer):
     """Handle the reply to a question Jack asked, and return our Reply."""
     asked, quote_id = question
+    # The question remembers the quote's own ID, not the number the tradesperson sees.
     if asked == "invoice_address":
-        return invoice_reply(client, f"{quote_id}\n{answer}")
+        return invoice_for(client, get_quote(quote_id), address_from(answer.splitlines()))
     if asked == "change":
-        return change_reply(client, f"{quote_id} {answer}")
+        return change_for(client, get_quote(quote_id), answer)
     if asked == "new_quote":
         return quote_reply(client, answer)
     if asked == "new_job":
@@ -348,12 +414,13 @@ def log_reply(client, details):
     if job is None:
         return Reply(LOG_HELP)
     job_id = save_job(client.id, **job)
-    lines = [f"Job {job_id} logged: {job['customer_name']}, {job['work']}."]
+    number = get_job(job_id).number
+    lines = [f"Job {job_label(number)} logged: {job['customer_name']}, {job['work']}."]
     if job.get("address"):
         lines.append("Address: " + job["address"].replace("\n", ", "))
     if job.get("customer_phone"):
         lines.append(f"Phone: {job['customer_phone']}")
-    return Reply("\n".join(lines), None, buttons_for(settings.WHATSAPP_JOB_BUTTONS, job_id))
+    return Reply("\n".join(lines), None, buttons_for(settings.WHATSAPP_JOB_BUTTONS, number))
 
 
 def owed_reply(client):
@@ -368,7 +435,7 @@ def owed_reply(client):
         overdue = (now_utc() - invoice["time"]).days - days_to_pay
         late = f", {overdue} days overdue" if overdue > 0 else ""
         lines.append(
-            f"Invoice {invoice['number']}: {invoice['customer_name']}, "
+            f"{invoice_label(invoice['number'])}: {invoice['customer_name']}, "
             f"{money(invoice['total_pence'])}{late}"
         )
     total = sum(invoice["total_pence"] for invoice in invoices)
@@ -376,34 +443,48 @@ def owed_reply(client):
 
 
 def paid_reply(client, details):
-    """Mark an invoice as paid. With no number, list what's owed and ask which."""
-    number = details.strip().removeprefix("INVOICE").removeprefix("invoice").strip()
-    if number == "":
+    """Mark an invoice as paid, by its number or the customer's name.
+
+    With neither, list what's owed and ask which.
+    """
+    ref = details.strip()
+    if ref == "":
         owed = owed_reply(client)
         if not unpaid_invoices(client.id):
             return owed
         ask_question(client.id, "mark_paid", 0)
-        return Reply(owed.text + "\n\nWhich invoice has been paid? Send its number.")
-    if not number.isdigit():
-        return Reply("To mark an invoice as paid, send PAID and its number, like PAID 3.")
-    result = mark_paid(client.id, int(number))
+        return Reply(owed.text + "\n\nWhich invoice has been paid? Send its number or the customer's name.")
+    number = read_number(ref, ("INVOICE", "INV"))
+    if number is None:
+        # A name: find their unpaid invoice, and ask if there's more than one.
+        theirs = [invoice for invoice in unpaid_invoices(client.id) if same_customer(invoice["customer_name"], ref)]
+        if not theirs:
+            return Reply(f"There's no unpaid invoice for {ref}.")
+        if len(theirs) > 1:
+            choices = ", ".join(
+                f"{invoice_label(invoice['number'])} ({money(invoice['total_pence'])})" for invoice in theirs
+            )
+            return Reply(f"{ref} has more than one unpaid invoice: {choices}. Which one? Send PAID and its number.")
+        number = theirs[0]["number"]
+    label = invoice_label(number)
+    result = mark_paid(client.id, number)
     if result is None:
-        return Reply(f"There's no invoice {number} for {client.business_name}.")
+        return Reply(f"There's no invoice {label} for {client.business_name}.")
     if result == "already paid":
-        return Reply(f"Invoice {number} was already marked as paid.")
-    return Reply(f"Invoice {number} marked as paid.")
+        return Reply(f"{label} was already marked as paid.")
+    return Reply(f"{label} marked as paid.")
 
 
 BOOK_HELP = "To book a job, send BOOK, the job and when, like:\nBOOK Mrs Jones, leaking radiator, Monday 9am"
 
 
 def book_reply(client, details):
-    """Book a logged job in ("BOOK JOB 4"), or log and book a new one in one go."""
-    words = details.split()
-    if len(words) == 2 and words[0].upper() == "JOB" and words[1].isdigit():
-        job = get_job(int(words[1]))
-        if job is None or job.client_id != client.id:
-            return Reply(f"There's no job {words[1]} for {client.business_name}.")
+    """Book a logged job in ("BOOK J4"), or log and book a new one in one go."""
+    job_number = read_number(details, ("JOB", "J"), need_prefix=True)
+    if job_number is not None:
+        job = get_job_by_number(client.id, job_number)
+        if job is None:
+            return Reply(f"There's no job {job_label(job_number)} for {client.business_name}.")
         ask_question(client.id, "book_job", job.id)
         return Reply(f"When's {job.customer_name}'s job? Like: Monday 9am, or Mon to Fri for a longer job.")
     if details.strip() == "":
@@ -472,7 +553,7 @@ COMMANDS = {
     "LOG": lambda client, rest: log_reply(client, rest),
     "QUOTE": lambda client, rest: quote_reply(client, rest),
     "CHANGE": lambda client, rest: change_reply(client, rest),
-    "FINAL": lambda client, rest: final_reply(client, rest.strip()),
+    "FINAL": lambda client, rest: final_reply(client, rest),
     "INVOICE": lambda client, rest: invoice_reply(client, rest),
     "PRICE": lambda client, rest: price_reply(client, rest),
     "PRICES": lambda client, rest: prices_reply(client),

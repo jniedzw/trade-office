@@ -5,7 +5,7 @@
 <div class="card">
   {% for invoice in owed %}
   <div class="job">
-    <strong>Invoice {{ invoice.number }}</strong>: {{ invoice.customer_name }}, {{ invoice.amount }}
+    <strong>{{ invoice.label }}</strong>: {{ invoice.customer_name }}, {{ invoice.amount }}
     {% if invoice.overdue > 0 %}<span class="late">· {{ invoice.overdue }} days overdue</span>{% endif %}
   </div>
   {% else %}
@@ -19,7 +19,7 @@
 <div class="card">
   {% for invoice, quote in invoices %}
   <div class="job">
-    Invoice {{ invoice.number }}: {{ quote.customer_name }}, {{ money(quote.total_pence) }}
+    {{ invoice_label(invoice.number) }}: {{ quote.customer_name }}, {{ money(quote.total_pence) }}
     <span class="muted">· {{ "paid " ~ day_name(invoice.paid_at) if invoice.paid_at else "unpaid" }}</span>
   </div>
   {% else %}

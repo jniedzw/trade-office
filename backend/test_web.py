@@ -203,7 +203,7 @@ def test_money_page(monkeypatch, tmp_path):
 
     assert "Owed to you: £1,250.50" in text
     assert "Paid this month: £85.00" in text
-    assert "Invoice 2: Mr Smith, £85.00" in text
+    assert "INV-0002: Mr Smith, £85.00" in text
 
 
 def test_download_gives_a_spreadsheet_file(monkeypatch, tmp_path):

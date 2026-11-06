@@ -8,6 +8,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font
 
 from diary import to_uk
+from quotes import invoice_label, job_label, quote_label
 
 # How long the download link works. Twilio fetches the file straight away to send it.
 LINK_LASTS = timedelta(hours=1)
@@ -57,11 +58,13 @@ def make_export(data, markup_percent):
     # Workbook() starts with an empty sheet we don't need.
     book.remove(book.active)
 
+    # Quotes point at jobs by their database ID; show the job's own number instead.
+    job_numbers = {job.id: job.number for job in data["jobs"]}
     jobs = []
     for job in data["jobs"]:
         booked = uk_day(job.starts_at)
         jobs.append([
-            job.id, uk_day(job.time), job.customer_name, job.customer_phone or "",
+            job_label(job.number), uk_day(job.time), job.customer_name, job.customer_phone or "",
             (job.address or "").replace("\n", ", "), job.work, job.status,
             booked, job.ends_on,
         ])
@@ -72,15 +75,15 @@ def make_export(data, markup_percent):
     )
 
     quotes = [
-        [quote.id, uk_day(quote.time), quote.customer_name, quote.title, quote.status,
-         pounds(quote.total_pence), quote.job_id]
+        [quote_label(quote.number), uk_day(quote.time), quote.customer_name, quote.title, quote.status,
+         pounds(quote.total_pence), job_label(job_numbers[quote.job_id]) if quote.job_id in job_numbers else ""]
         for quote in data["quotes"]
     ]
     add_sheet(book, "Quotes", ["Quote", "Date", "Customer", "Work", "Status", "Total", "Job"], quotes, {1: DAY, 5: MONEY})
 
     invoices = [
-        [invoice.number, uk_day(invoice.time), quote.customer_name,
-         invoice.customer_address.replace("\n", ", "), quote.id,
+        [invoice_label(invoice.number), uk_day(invoice.time), quote.customer_name,
+         invoice.customer_address.replace("\n", ", "), quote_label(quote.number),
          pounds(quote.total_pence), uk_day(invoice.paid_at)]
         for invoice, quote in data["invoices"]
     ]

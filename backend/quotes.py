@@ -97,6 +97,38 @@ def parse_job(details):
     return {"customer_name": parts[0], "work": parts[-1], "address": address}
 
 
+def job_label(number):
+    """Return how a job's number is shown, like J4."""
+    return f"J{number}"
+
+
+def quote_label(number):
+    """Return how a quote's number is shown, like Q12."""
+    return f"Q{number}"
+
+
+def invoice_label(number):
+    """Return how an invoice's number is shown, like INV-0244."""
+    return f"INV-{number:04}"
+
+
+def read_number(text, prefixes, need_prefix=False):
+    """Return the number in text like "12", "Q12", "#12" or "INV-0244", or None.
+
+    prefixes are the letters that may come first, longest first, like ("INVOICE", "INV").
+    With need_prefix, a bare number doesn't count: "4" isn't a job, but "J4" is.
+    """
+    text = text.strip().upper().replace(" ", "").lstrip("#")
+    for prefix in prefixes:
+        if text.startswith(prefix):
+            text = text[len(prefix):].lstrip("-#")
+            break
+    else:
+        if need_prefix:
+            return None
+    return int(text) if text.isdigit() else None
+
+
 def reference(prefix, job_code, day):
     """Return a quote reference like DPL-BR-011126.
 

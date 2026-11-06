@@ -9,13 +9,13 @@ from export import make_export
 
 
 def made_up_data():
-    quote = Quote(id=3, client_id=1, customer_name="Mrs Jones", title="Bathroom refit", job_code="BR",
+    quote = Quote(id=3, number=2, client_id=1, customer_name="Mrs Jones", title="Bathroom refit", job_code="BR",
                   total_pence=125050, status="final", job_id=1,
                   time=datetime(2026, 11, 4, 10, 0, tzinfo=timezone.utc))
     invoice = Invoice(id=1, client_id=1, quote_id=3, number=1, customer_address="12 Test Road\nLiverpool",
                       time=datetime(2026, 11, 20, tzinfo=timezone.utc),
                       paid_at=datetime(2026, 11, 25, tzinfo=timezone.utc))
-    job = Job(id=1, client_id=1, customer_name="Mrs Jones", work="Bathroom refit", status="paid",
+    job = Job(id=1, number=1, client_id=1, customer_name="Mrs Jones", work="Bathroom refit", status="paid",
               address="12 Test Road\nLiverpool", time=datetime(2026, 11, 1, tzinfo=timezone.utc),
               starts_at=datetime(2026, 11, 9, 8, 0, tzinfo=timezone.utc), ends_on=date(2026, 11, 13))
     return {"jobs": [job], "quotes": [quote], "invoices": [(invoice, quote)], "prices": [("day rate", 25000)]}
@@ -62,3 +62,11 @@ def test_an_empty_export_still_works():
     data = {"jobs": [], "quotes": [], "invoices": [], "prices": []}
 
     assert open_export(data)["Jobs"].max_row == 1
+
+
+def test_numbers_are_shown_as_labels():
+    book = open_export()
+
+    assert book["Jobs"]["A2"].value == "J1"
+    assert [book["Quotes"]["A2"].value, book["Quotes"]["G2"].value] == ["Q2", "J1"]
+    assert [book["Invoices"]["A2"].value, book["Invoices"]["E2"].value] == ["INV-0001", "Q2"]

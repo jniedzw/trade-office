@@ -1,6 +1,17 @@
 from datetime import date
 
-from quotes import money, parse_job, parse_quote, reference, to_pence, uk_date
+from quotes import (
+    invoice_label,
+    job_label,
+    money,
+    parse_job,
+    parse_quote,
+    quote_label,
+    read_number,
+    reference,
+    to_pence,
+    uk_date,
+)
 
 
 def test_money_adds_pound_sign_and_pence():
@@ -79,3 +90,25 @@ def test_parse_job_with_and_without_an_address():
     assert parse_job("Mrs Jones | Leaking radiator")["address"] is None
     assert parse_job("leaking radiator for mrs jones") is None
     assert parse_job("Mrs Jones |  | Leaking radiator") is None
+
+
+def test_labels():
+    assert (job_label(4), quote_label(12), invoice_label(244)) == ("J4", "Q12", "INV-0244")
+
+
+def test_read_number_takes_every_way_of_writing_it():
+    for text in ["12", "Q12", "q12", "#12", "Q 12", "q-12"]:
+        assert read_number(text, ("Q",)) == 12, text
+    for text in ["244", "INV-0244", "inv 244", "INVOICE 244", "#0244"]:
+        assert read_number(text, ("INVOICE", "INV")) == 244, text
+
+
+def test_read_number_needs_digits():
+    assert read_number("mrs jones", ("Q",)) is None
+    assert read_number("Q", ("Q",)) is None
+
+
+def test_a_job_needs_its_letter():
+    assert read_number("J4", ("JOB", "J"), need_prefix=True) == 4
+    assert read_number("JOB 4", ("JOB", "J"), need_prefix=True) == 4
+    assert read_number("4", ("JOB", "J"), need_prefix=True) is None

@@ -810,7 +810,7 @@ def test_a_tapped_button_runs_its_command(monkeypatch, tmp_path):
     # The button's title is "Make final", but its hidden ID is the command.
     response = signed_whatsapp(OWNER, body="Make final", button="FINAL 1")
 
-    assert "Quote 1 is final" in response.text
+    assert "Quote Q1 is final" in response.text
     assert database.get_quote(1).status == "final"
 
 

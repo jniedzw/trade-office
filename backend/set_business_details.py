@@ -45,6 +45,10 @@ def main():
     payment_days = int(input("Days to pay an invoice (Enter for 14): ").strip() or 14)
     bank_details = ask_lines("Bank details for invoices")
     contact = input("Phone or email for customers: ").strip()
+    # Carry on from their own invoices: if their last was INV-0243, this is 244.
+    invoice_start = input("Number for their next invoice (Enter for 1): ").strip() or "1"
+    while not invoice_start.isdigit():
+        invoice_start = input("Please type a number, like 244: ").strip()
     brand_colour = input("Accent colour, like #b8975a (Enter for gold): ").strip() or "#b8975a"
     while not is_colour(brand_colour):
         brand_colour = input("Please use # and 6 letters or digits (Enter for gold): ").strip() or "#b8975a"
@@ -58,6 +62,7 @@ def main():
         bank_details=bank_details,
         brand_colour=brand_colour,
         contact=contact,
+        invoice_start=int(invoice_start),
     )
     print(f"Saved details for {client.business_name}.")
 

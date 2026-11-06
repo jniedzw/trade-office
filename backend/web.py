@@ -21,7 +21,7 @@ from database import (
 )
 from diary import day_name, to_uk, uk_now, week_days
 from export import XLSX, make_export
-from quotes import money
+from quotes import invoice_label, money
 
 router = APIRouter()
 # Found next to this file, whichever folder the server is started from.
@@ -116,7 +116,7 @@ def money_page(request: Request):
     days_to_pay = details.payment_days if details else 14
     owed = [
         {
-            "number": invoice["number"],
+            "label": invoice_label(invoice["number"]),
             "customer_name": invoice["customer_name"],
             "amount": money(invoice["total_pence"]),
             "overdue": (now_utc() - invoice["time"]).days - days_to_pay,
@@ -133,7 +133,8 @@ def money_page(request: Request):
     return page(
         request, "money.html", client=client, owed=owed, invoices=list(reversed(invoices)),
         owed_total=money(sum(invoice["total_pence"] for invoice in unpaid_invoices(client.id))),
-        paid_this_month=money(paid), money=money, day_name=lambda moment: day_name(to_uk(moment)),
+        paid_this_month=money(paid), money=money, invoice_label=invoice_label,
+        day_name=lambda moment: day_name(to_uk(moment)),
     )
 
 
