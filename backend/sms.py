@@ -57,6 +57,19 @@ def send_whatsapp_buttons(to: str, template: str, variables: dict) -> str:
     return message.sid
 
 
+def send_weekly_update(to: str, jobs: str, owed: str) -> str:
+    """Send the Sunday week-ahead template and return Twilio's message ID."""
+    # Jack messages first here, so it has to be a template Meta has approved.
+    message = client.messages.create(
+        to=f"whatsapp:{to}",
+        from_=f"whatsapp:{settings.WHATSAPP_NUMBER}",
+        content_sid=settings.WHATSAPP_WEEKLY_TEMPLATE,
+        content_variables=json.dumps({"1": jobs, "2": owed}),
+        status_callback=f"{settings.PUBLIC_URL}/whatsapp-status",
+    )
+    return message.sid
+
+
 def count_old_twilio_records(cutoff) -> tuple[int, int]:
     """Return how many messages and calls Twilio holds from before cutoff."""
     # A dry run: this only counts, so we can check the numbers before deleting anything.

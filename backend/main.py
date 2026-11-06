@@ -35,6 +35,7 @@ from export import XLSX, make_export
 from pdfs import make_invoice_pdf, make_quote_pdf
 from quotes import link_is_valid
 from sms import count_old_twilio_records, send_whatsapp_alert
+from weekly import send_weekly_updates
 from whatsapp import send_with_buttons, whatsapp_reply
 
 # The usual opt-out and opt-in words for text messages.
@@ -73,6 +74,11 @@ async def lifespan(app):
     )
     # Twilio tells us when delivery fails, but a phone that's off tells us nothing.
     scheduler.add_job(send_overdue_alerts, "interval", minutes=1)
+    # Sunday 6pm UK time, so it moves with the clocks rather than drifting an hour.
+    scheduler.add_job(
+        send_weekly_updates, "cron", day_of_week="sun", hour=18,
+        timezone="Europe/London", misfire_grace_time=3600,
+    )
     scheduler.start()
     yield
     scheduler.shutdown()

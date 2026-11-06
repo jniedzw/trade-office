@@ -247,6 +247,12 @@ def log_call(client_id, caller, texted):
         session.commit()
 
 
+def active_clients():
+    """Return every client who isn't paused."""
+    with Session(engine) as session:
+        return session.exec(select(Client).where(Client.active == True)).all()  # noqa: E712
+
+
 def get_client_by_owner(owner_mobile):
     """Return the client with this mobile, or None if there isn't one."""
     with Session(engine) as session:
