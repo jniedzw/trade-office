@@ -1,4 +1,5 @@
 """Check the AI quote reader against made-up messages with known right answers.
+Some messages use a made-up price list, so Jack has to add up the total himself.
 
 This calls the real AI, so each run costs a few pence. Usage:
     python eval_quotes.py                     (the model in ai.py)
@@ -37,9 +38,34 @@ CASES = [
 ]
 
 
-def check(message, customer, total_pence, line_count):
+# A made-up price list and markup, for messages that leave the total to Jack.
+PRICE_LIST = [
+    ("day rate", 25000),
+    ("hour", 4500),
+    ("call-out", 6000),
+    ("boiler service", 8500),
+    ("gas safety cert", 6500),
+]
+MARKUP = 15
+
+# The same as CASES, but priced from the list: Jack adds it up in code.
+PRICED_CASES = [
+    ("boiler service for dave", "Dave", 8500, 1),
+    ("mrs patel bathroom, 3 days, 650 materials", "Mrs Patel", 149750, 1),
+    ("gas safety cert and boiler service, Mr Hughes", "Mr Hughes", 15000, 2),
+    ("call-out plus 2 hours for Bev, leaking tap", "Bev", 15000, 2),
+    ("Karen Webb, 2 days on the extension heating, 1,200 materials", "Karen Webb", 188000, 1),
+    ("powerflush for Gary", None, None, 1),  # not on the list, so Jack must ask
+    ("tom, some days on the kitchen", None, None, 1),  # no number of days
+]
+
+
+def check(message, customer, total_pence, line_count, priced=False):
     """Return a list of what the AI got wrong for one message (empty if right)."""
-    quote = ai.read_quote(message)
+    if priced:
+        quote = ai.read_quote(message, prices=PRICE_LIST, markup_percent=MARKUP)
+    else:
+        quote = ai.read_quote(message)
     if customer is None:
         return [] if quote is None else [f"should refuse, but priced it {quote['total_pence']}"]
     if quote is None:
@@ -62,13 +88,14 @@ def main():
     print(f"Model: {ai.AI_MODEL}")
 
     passed = 0
-    for number, (message, customer, total_pence, line_count) in enumerate(CASES, start=1):
-        problems = check(message, customer, total_pence, line_count)
+    cases = [(case, False) for case in CASES] + [(case, True) for case in PRICED_CASES]
+    for number, ((message, customer, total_pence, line_count), priced) in enumerate(cases, start=1):
+        problems = check(message, customer, total_pence, line_count, priced)
         if problems:
             print(f"{number:2}. FAIL {message[:45]!r}: {'; '.join(problems)}")
         else:
             passed += 1
-    print(f"Passed {passed} of {len(CASES)}")
+    print(f"Passed {passed} of {len(cases)}")
 
 
 if __name__ == "__main__":

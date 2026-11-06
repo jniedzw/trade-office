@@ -47,7 +47,7 @@ def use_fakes(monkeypatch, tmp_path, active=True, failing=()):
     # Off unless a test turns it on, whatever the real .env says.
     monkeypatch.setattr(settings, "QUOTE_LINK_SECRET", None)
     # Tests must never reach the real AI, which costs money.
-    monkeypatch.setattr(main, "read_quote", lambda details, typed=None: None)
+    monkeypatch.setattr(main, "read_quote", lambda details, **kwargs: None)
     monkeypatch.setattr(main, "read_job", lambda details: None)
     monkeypatch.setattr(main, "read_booking", lambda message, now_uk: None)
     monkeypatch.setattr(main, "change_quote", lambda quote, lines, change: None)
@@ -904,7 +904,7 @@ def test_a_rough_quote_is_read_by_the_ai(monkeypatch, tmp_path):
         "total_pence": 125000,
         "lines": ["Remove old suite"],
     }
-    monkeypatch.setattr(main, "read_quote", lambda details: quote)
+    monkeypatch.setattr(main, "read_quote", lambda details, **kwargs: quote)
 
     text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "quote bathroom mrs jones 1250")
 
@@ -1275,7 +1275,7 @@ def test_saving_changing_and_listing_prices(monkeypatch, tmp_path):
     main.whatsapp_reply(f"whatsapp:{OWNER}", "PRICE gas safety cert 65")
 
     text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "PRICES")
-    assert text == "Your prices:\nboiler service: £90.00\ngas safety cert: £65.00"
+    assert text == "Your prices:\nboiler service: £90.00\ngas safety cert: £65.00\nMaterials markup: 0%"
 
 
 def test_deleting_a_price(monkeypatch, tmp_path):
@@ -1423,7 +1423,7 @@ def test_quote_it_turns_a_job_into_a_quote(monkeypatch, tmp_path):
     log_test_job()
     seen = []
 
-    def fake_read_quote(details, typed=None):
+    def fake_read_quote(details, typed=None, **kwargs):
         seen.append(typed)
         return {"customer_name": "Someone else", "title": "Radiator", "job_code": "RAD",
                 "total_pence": 45000, "lines": ["Fit new radiator"]}
@@ -1636,3 +1636,14 @@ def test_nothing_booked(monkeypatch, tmp_path):
     text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "WEEK")
 
     assert text == "Nothing booked for the next 7 days."
+
+
+def test_markup(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "MARKUP 15%")
+    assert text == "Saved: 15% added to materials on your quotes."
+    assert database.get_client(1).markup_percent == 15
+
+    text, link, buttons = main.whatsapp_reply(f"whatsapp:{OWNER}", "MARKUP lots")
+    assert text.startswith("To set your materials markup")

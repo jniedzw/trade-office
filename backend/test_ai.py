@@ -10,6 +10,7 @@ import settings
 from ai import (
     BookingDraft,
     JobDraft,
+    PricedItem,
     QuoteDraft,
     change_quote,
     prices_in,
@@ -36,6 +37,8 @@ def good_draft(**changes):
         "title": "Bathroom refit",
         "job_code": "br",
         "price": "1,250",
+        "items": [],
+        "materials": None,
         "lines": ["Remove old suite", "Fit new basin and toilet", " "],
     }
     return QuoteDraft(**(details | changes))
@@ -232,3 +235,50 @@ def test_read_job_without_the_work_still_saves_a_job(monkeypatch):
     use_fake_claude(monkeypatch, draft)
 
     assert read_job("book mr jones friday 3pm")["work"] == "Job"
+
+
+PRICE_LIST = [("day rate", 25000), ("boiler service", 8500), ("call-out", 6000)]
+
+
+def priced_draft(items, materials=None):
+    return good_draft(price=None, items=[PricedItem(name=n, quantity=q) for n, q in items], materials=materials)
+
+
+def test_read_quote_adds_up_items_and_materials_with_markup(monkeypatch):
+    use_fake_claude(monkeypatch, priced_draft([("Day rate", "3")], materials="650"))
+
+    quote = read_quote("mrs jones bathroom, 3 days, 650 materials", prices=PRICE_LIST, markup_percent=15)
+
+    # 3 days at £250, plus £650 materials with 15% on top: £750 + £747.50.
+    assert quote["total_pence"] == 149750
+
+
+def test_read_quote_with_one_item_and_no_quantity_typed(monkeypatch):
+    use_fake_claude(monkeypatch, priced_draft([("boiler service", "1")]))
+
+    assert read_quote("boiler service for dave", prices=PRICE_LIST)["total_pence"] == 8500
+
+
+def test_read_quote_rejects_an_item_not_on_the_list(monkeypatch):
+    use_fake_claude(monkeypatch, priced_draft([("powerflush", "1")]))
+
+    assert read_quote("powerflush for dave", prices=PRICE_LIST) is None
+
+
+def test_read_quote_rejects_a_quantity_that_wasnt_typed(monkeypatch):
+    use_fake_claude(monkeypatch, priced_draft([("day rate", "4")]))
+
+    assert read_quote("bathroom for mrs jones, 3 days", prices=PRICE_LIST) is None
+
+
+def test_read_quote_rejects_materials_that_werent_typed(monkeypatch):
+    use_fake_claude(monkeypatch, priced_draft([("day rate", "1")], materials="900"))
+
+    assert read_quote("mrs jones, 1 day plus materials", prices=PRICE_LIST) is None
+
+
+def test_a_typed_total_beats_the_price_list(monkeypatch):
+    draft = good_draft(price="1,250", items=[PricedItem(name="day rate", quantity="3")])
+    use_fake_claude(monkeypatch, draft)
+
+    assert read_quote(MESSAGE, prices=PRICE_LIST)["total_pence"] == 125000

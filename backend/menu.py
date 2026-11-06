@@ -19,7 +19,7 @@ MENU_CHOICES = [
 ]
 
 # Commands reached another way: by buttons, or typed with a quote number.
-NOT_IN_MENU = ["FINAL", "CHANGE", "INVOICE", "PRICE", "ALERTS"]
+NOT_IN_MENU = ["FINAL", "CHANGE", "INVOICE", "PRICE", "MARKUP", "ALERTS"]
 
 # What Jack says to anything he doesn't recognise, like "morning".
 MENU_TEXT = "Hi, it's Jack. What do you need? Tap Options."
@@ -37,6 +37,7 @@ HELP_TEXT = (
     "PAID 3 when invoice 3 is paid\n"
     "PRICE boiler service 85 to save a price\n"
     "PRICES to see your prices\n"
+    "MARKUP 15 to add 15% to materials\n"
     "Or just say hi for the menu."
 )
 

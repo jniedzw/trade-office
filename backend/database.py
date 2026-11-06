@@ -27,6 +27,8 @@ class Client(SQLModel, table=True):
     twilio_number: str = Field(unique=True, index=True)
     text_back_message: str
     active: bool = True
+    # Added to materials on quotes, as a percentage.
+    markup_percent: int = 0
 
 
 def now_utc():
@@ -211,6 +213,7 @@ NEW_COLUMNS = [
     ("invoice", "paid_at", "DATETIME"),
     ("job", "starts_at", "DATETIME"),
     ("job", "ends_on", "DATE"),
+    ("client", "markup_percent", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 
@@ -597,6 +600,15 @@ def set_price(client_id, name, pence):
         item = session.exec(statement).first() or PriceItem(client_id=client_id, name=name)
         item.pence = pence
         session.add(item)
+        session.commit()
+
+
+def set_markup(client_id, percent):
+    """Save the percentage this client adds to materials on quotes."""
+    with Session(engine) as session:
+        client = session.get(Client, client_id)
+        client.markup_percent = percent
+        session.add(client)
         session.commit()
 
 

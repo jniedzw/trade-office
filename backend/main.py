@@ -11,6 +11,7 @@ import ai
 import settings
 from ai import change_quote, read_booking, read_job, read_quote
 from database import (
+    set_markup,
     book_job,
     booked_jobs,
     mark_paid,
@@ -272,7 +273,9 @@ def quote_reply(client, details):
         alert_james(client, "hit the daily quote limit.")
         return Reply(f"That's {MAX_QUOTES_PER_DAY} quotes today, the daily limit. Try again tomorrow.")
     # The exact typed format first: it's free and can't be misread. Then the AI.
-    quote = parse_quote(details) or read_quote(details)
+    quote = parse_quote(details) or read_quote(
+        details, prices=get_prices(client.id), markup_percent=client.markup_percent
+    )
     if quote is None:
         return Reply(QUOTE_HELP)
     return draft_reply(save_quote(client.id, **quote), quote)
@@ -294,7 +297,12 @@ def quote_from_job(client, job_id, answer):
     job = get_job(job_id)
     # Start with the job's details, so the tradesperson only has to add the price and the work.
     # Only his answer counts for the price, not numbers in the job like "3 radiators".
-    quote = read_quote(f"For {job.customer_name}: {job.work}. {answer}", typed=answer)
+    quote = read_quote(
+        f"For {job.customer_name}: {job.work}. {answer}",
+        typed=answer,
+        prices=get_prices(client.id),
+        markup_percent=client.markup_percent,
+    )
     if quote is None:
         return Reply("Sorry, I couldn't make that quote. Make sure it has a price, like: 450, fit new radiator")
     # The customer is the job's customer, whatever the AI read.
@@ -397,6 +405,7 @@ def is_new_command(command):
 
 PRICE_HELP = (
     "To save a price, send PRICE, the job and the price, like:\nPRICE boiler service 85\n"
+    "Rates work the same way, like PRICE day rate 250\n"
     "To remove one: PRICE boiler service DELETE\nTo see them all: PRICES"
 )
 
@@ -423,7 +432,17 @@ def prices_reply(client):
     if not prices:
         return Reply("You haven't saved any prices yet.\n" + PRICE_HELP)
     lines = [f"{name}: {money(pence)}" for name, pence in prices]
+    lines.append(f"Materials markup: {client.markup_percent}%")
     return Reply("Your prices:\n" + "\n".join(lines))
+
+
+def markup_reply(client, details):
+    """Save the percentage the client adds to materials."""
+    percent = details.strip().removesuffix("%").strip()
+    if not percent.isdigit() or int(percent) > 100:
+        return Reply("To set your materials markup, send MARKUP and a percentage, like MARKUP 15.")
+    set_markup(client.id, int(percent))
+    return Reply(f"Saved: {percent}% added to materials on your quotes.")
 
 
 CHANGE_HELP = "To change a quote, send CHANGE, its number and what to change, like:\nCHANGE 3 price is 1300"
@@ -624,6 +643,7 @@ COMMANDS = {
     "INVOICE": lambda client, rest: invoice_reply(client, rest),
     "PRICE": lambda client, rest: price_reply(client, rest),
     "PRICES": lambda client, rest: prices_reply(client),
+    "MARKUP": lambda client, rest: markup_reply(client, rest),
     "HELP": lambda client, rest: Reply(HELP_TEXT),
     "ALERTS": lambda client, rest: alerts_reply(client, rest),
     "PAID": lambda client, rest: paid_reply(client, rest),

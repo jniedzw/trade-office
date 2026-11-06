@@ -4,6 +4,7 @@ import json
 import re
 import time
 from contextvars import ContextVar
+from decimal import ROUND_HALF_UP, Decimal
 
 import anthropic
 from pydantic import BaseModel
@@ -11,7 +12,7 @@ from pydantic import BaseModel
 import database
 import diary
 import settings
-from quotes import to_pence
+from quotes import money, to_pence
 
 AI_MODEL = "claude-sonnet-5-5"
 
@@ -29,8 +30,18 @@ Pick out:
   Never work out, round or guess a price. Use null if there isn't one, if it's a
   range like "500-600", if they say they're not sure, or if they add extras with
   no price, like "plus parts".
+- items: only when they don't give a total price. Things from their price list
+  below that the job uses, with the name copied exactly from the list, and the
+  quantity as a number they wrote ("3" for "3 days"). Use "1" only when they
+  clearly mean one, like "a boiler service" or "a day". If they don't say how many
+  days or hours ("some days", "a few hours"), leave items empty so we can ask.
+  Never add a name that isn't on the list. Empty if they gave a total price.
+- materials: the cost of materials as a number they wrote, or null.
 - lines: each piece of work they mention, as short lines in their order.
-If there's no customer name, use an empty string."""
+If there's no customer name, use an empty string.
+
+Their price list:
+{price_list}"""
 
 
 CHANGE_INSTRUCTIONS = """You update a UK tradesperson's draft quote.
@@ -82,6 +93,13 @@ class JobDraft(BaseModel):
     work: str
 
 
+class PricedItem(BaseModel):
+    """One thing from the price list, and how many."""
+
+    name: str
+    quantity: str
+
+
 class QuoteDraft(BaseModel):
     """The shape Claude must answer in."""
 
@@ -89,6 +107,8 @@ class QuoteDraft(BaseModel):
     title: str
     job_code: str
     price: str | None
+    items: list[PricedItem]
+    materials: str | None
     lines: list[str]
 
 
@@ -153,13 +173,16 @@ def safely_ask_claude(message, system=INSTRUCTIONS, shape=None):
         return None
 
 
-def read_quote(message, typed=None):
+def read_quote(message, typed=None, prices=(), markup_percent=0):
     """Turn a rough message into the same dict parse_quote makes, or None.
 
     typed is the part the tradesperson wrote, if message has more added to it.
+    prices is their price list as (name, pence) pairs, and markup_percent goes on materials.
     """
-    # The price must be one the tradesperson actually wrote, so the AI can't invent one.
-    return tidy(safely_ask_claude(message), prices_in(typed or message))
+    price_list = "\n".join(f"- {name}: {money(pence)}" for name, pence in prices) or "(none yet)"
+    draft = safely_ask_claude(message, INSTRUCTIONS.format(price_list=price_list))
+    # Every amount must be one the tradesperson wrote or saved, so the AI can't invent one.
+    return tidy(draft, prices_in(typed or message), dict(prices), markup_percent)
 
 
 def change_quote(quote, lines, change):
@@ -176,13 +199,19 @@ def change_quote(quote, lines, change):
     return tidy(draft, prices_in(change) | {quote.total_pence})
 
 
-def tidy(draft, allowed_prices):
+def tidy(draft, allowed_prices, price_list=None, markup_percent=0):
     """Check Claude's QuoteDraft and return it as a quote dict, or None."""
-    if draft is None or draft.price is None or draft.customer_name.strip() == "":
+    if draft is None or draft.customer_name.strip() == "":
         return None
 
-    total_pence = to_pence(draft.price)
-    if total_pence is None or total_pence not in allowed_prices:
+    if draft.price is not None:
+        # A total they typed always wins.
+        total_pence = to_pence(draft.price)
+        if total_pence not in allowed_prices:
+            return None
+    else:
+        total_pence = add_up(draft, allowed_prices, price_list or {}, markup_percent)
+    if total_pence is None:
         return None
 
     job_code = draft.job_code.strip().upper()[:4]
@@ -196,6 +225,32 @@ def tidy(draft, allowed_prices):
         "total_pence": total_pence,
         "lines": [line.strip() for line in draft.lines if line.strip()],
     }
+
+
+def add_up(draft, typed_amounts, price_list, markup_percent):
+    """Work out the total from price list items and materials, in pence, or None.
+
+    The AI only says which items and how many; the adding up happens here.
+    """
+    if not draft.items and draft.materials is None:
+        return None
+    total = Decimal(0)
+    for item in draft.items:
+        pence = price_list.get(item.name.strip().lower())
+        quantity = to_pence(item.quantity)
+        # The item must be on their list, and any quantity other than 1 must be one they typed.
+        if pence is None or quantity is None or quantity > 100 * 100:
+            return None
+        if quantity != 100 and quantity not in typed_amounts:
+            return None
+        total += pence * Decimal(quantity) / 100
+    if draft.materials is not None:
+        materials = to_pence(draft.materials)
+        if materials not in typed_amounts:
+            return None
+        total += materials * (1 + Decimal(markup_percent) / 100)
+    # Round to the nearest penny, with halves going up, the way people expect.
+    return int(total.quantize(Decimal(1), rounding=ROUND_HALF_UP))
 
 
 def uk_mobile(number, message):
