@@ -176,6 +176,20 @@ class PriceItem(SQLModel, table=True):
     pence: int
 
 
+class AiCall(SQLModel, table=True):
+    """One call to the AI, for working out costs. Never the message itself."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    # None when there's no client, as when the test set runs.
+    client_id: int | None = Field(default=None, index=True)
+    purpose: str
+    model: str
+    input_tokens: int
+    output_tokens: int
+    seconds: float
+    time: datetime = Field(default_factory=now_utc)
+
+
 class PendingQuestion(SQLModel, table=True):
     """Something Jack asked a client and is waiting to hear back about."""
 
@@ -535,6 +549,29 @@ def booked_jobs(client_id, since):
         statement = select(Job).where(
             Job.client_id == client_id, Job.starts_at >= since - timedelta(days=60)
         )
+        return session.exec(statement).all()
+
+
+def record_ai_call(client_id, purpose, model, input_tokens, output_tokens, seconds):
+    """Save the details of one AI call."""
+    with Session(engine) as session:
+        session.add(
+            AiCall(
+                client_id=client_id,
+                purpose=purpose,
+                model=model,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                seconds=seconds,
+            )
+        )
+        session.commit()
+
+
+def ai_calls_since(since):
+    """Return every AI call since a time, oldest first."""
+    with Session(engine) as session:
+        statement = select(AiCall).where(AiCall.time >= since).order_by(AiCall.time)
         return session.exec(statement).all()
 
 

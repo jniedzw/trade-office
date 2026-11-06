@@ -1,5 +1,5 @@
 import main
-from create_button_templates import MENU, TEMPLATES, template
+from create_button_templates import MENU, TEMPLATES, WEEKLY, template
 
 
 def test_buttons_fit_whatsapps_limits():
@@ -22,3 +22,10 @@ def test_menu_choices_are_commands_jack_knows():
         # WhatsApp list items must be short, and each id must be a command.
         assert len(choice["item"]) <= 24
         assert main.is_new_command(choice["id"])
+
+
+def test_weekly_template_follows_whatsapps_rules():
+    body = WEEKLY["body"]
+    # WhatsApp rejects a template that starts or ends with a variable.
+    assert not body.startswith("{{") and not body.endswith("}}")
+    assert all(main.is_new_command(button["id"]) for button in WEEKLY["actions"])

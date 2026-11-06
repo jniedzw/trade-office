@@ -2,15 +2,22 @@
 
 import json
 import re
+import time
+from contextvars import ContextVar
 
 import anthropic
 from pydantic import BaseModel
 
+import database
 import diary
 import settings
 from quotes import to_pence
 
 AI_MODEL = "claude-sonnet-5-5"
+
+# Which client the AI is working for right now, so each call's cost is logged
+# against them. main.py sets it for every WhatsApp message.
+current_client_id = ContextVar("current_client_id", default=None)
 
 INSTRUCTIONS = """You read WhatsApp messages from a UK tradesperson who wants to quote a customer.
 Pick out:
@@ -41,15 +48,17 @@ Pick out:
 - customer_name: who the job is for, as they wrote it. Empty string if there isn't one.
 - customer_phone: the customer's phone number exactly as written, or null.
 - address: the job's address as written, with each part on a new line, or null.
-- work: a short description of the work, like "Leaking radiator in the kitchen".
+- work: a short description of the work only, like "Leaking radiator in the kitchen".
+  Leave out when it's booked for. Empty string if they don't say what the work is.
 Never make up a phone number or address: use null if they didn't write one."""
 
 
 BOOKING_INSTRUCTIONS = """You read when a UK tradesperson has booked a job in.
 {today}
 Answer with:
-- date: the day the job starts, as YYYY-MM-DD. A weekday like "Monday" means the next
-  one after today, or today if they say "today".
+- date: the day the job starts, as YYYY-MM-DD. A weekday like "Friday" means the
+  next time that day comes: today if today is that day and the time they give hasn't
+  passed yet, otherwise that day next week. "Next Friday" means the Friday after that.
 - time: the start time as HH:MM in 24-hour time, or null if they don't give one.
 - end_date: the last day as YYYY-MM-DD for a job over several days ("Mon to Fri",
   "3 days"), or null for a one-day job.
@@ -96,6 +105,7 @@ def ask_claude(message, system=INSTRUCTIONS, shape=None):
     shape is the Pydantic class to answer in: a QuoteDraft unless we say otherwise.
     """
     client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY, timeout=30)
+    started = time.perf_counter()
     response = client.beta.messages.parse(
         model=AI_MODEL,
         max_tokens=2000,
@@ -108,8 +118,27 @@ def ask_claude(message, system=INSTRUCTIONS, shape=None):
         betas=["server-side-fallback-2026-07-01"],
         fallbacks="default",
     )
+    record(system, shape, response, time.perf_counter() - started)
     # parsed_output is None if Claude refused or stopped early.
     return response.parsed_output
+
+
+def record(system, shape, response, seconds):
+    """Log the call's cost details: tokens and time, never the message itself."""
+    purpose = "change" if system == CHANGE_INSTRUCTIONS else (shape or QuoteDraft).__name__
+    try:
+        database.record_ai_call(
+            current_client_id.get(),
+            purpose,
+            # The model that answered, which may be a fallback.
+            response.model,
+            response.usage.input_tokens,
+            response.usage.output_tokens,
+            round(seconds, 2),
+        )
+    except Exception as error:
+        # A logging failure must never lose the tradesperson's quote.
+        print(f"AI log failed: {type(error).__name__}", flush=True)
 
 
 def safely_ask_claude(message, system=INSTRUCTIONS, shape=None):
@@ -185,12 +214,13 @@ def uk_mobile(number, message):
 def read_job(message):
     """Turn a rough message about a new job into a dict for save_job, or None."""
     draft = safely_ask_claude(message, JOB_INSTRUCTIONS, JobDraft)
-    if draft is None or draft.customer_name.strip() == "" or draft.work.strip() == "":
+    if draft is None or draft.customer_name.strip() == "":
         return None
     address = (draft.address or "").strip()
     return {
         "customer_name": draft.customer_name.strip(),
-        "work": draft.work.strip(),
+        # "Book Mr Jones Friday 3pm" doesn't say what the work is, which the tradesperson can add later.
+        "work": draft.work.strip() or "Job",
         "customer_phone": uk_mobile(draft.customer_phone or "", message),
         # An address must be one they wrote, at least in part, not one the AI made up.
         "address": address if address and address.split()[0].lower() in message.lower() else None,

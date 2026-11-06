@@ -5,6 +5,7 @@ import anthropic
 import httpx2
 
 import ai
+import database
 import settings
 from ai import (
     BookingDraft,
@@ -18,6 +19,7 @@ from ai import (
     uk_mobile,
 )
 from database import Quote
+from test_database import use_temp_database
 
 MESSAGE = "bathroom for mrs jones, rip out old suite, new basin and loo, 1,250 all in"
 
@@ -192,3 +194,41 @@ def test_read_booking_rejects_a_bad_date(monkeypatch):
 
     use_fake_claude(monkeypatch, BookingDraft(date="soon", time=None, end_date=None))
     assert read_booking("soon", THURSDAY) is None
+
+
+class FakeResponse:
+    """Just the parts of Claude's response that record() reads."""
+
+    model = "claude-sonnet-5-5"
+
+    class usage:
+        input_tokens = 900
+        output_tokens = 120
+
+
+def test_record_logs_the_cost_against_the_client(monkeypatch, tmp_path):
+    use_temp_database(monkeypatch, tmp_path)
+    ai.current_client_id.set(1)
+
+    ai.record(ai.JOB_INSTRUCTIONS, JobDraft, FakeResponse(), 1.234)
+
+    [logged] = database.ai_calls_since(database.now_utc().replace(year=2000))
+    assert (logged.client_id, logged.purpose, logged.input_tokens, logged.seconds) == (1, "JobDraft", 900, 1.23)
+
+
+def test_a_logging_failure_doesnt_lose_the_answer(monkeypatch, capsys):
+    def broken(*args):
+        raise RuntimeError("database is down")
+
+    monkeypatch.setattr(database, "record_ai_call", broken)
+
+    ai.record(ai.INSTRUCTIONS, None, FakeResponse(), 1.0)
+
+    assert "AI log failed: RuntimeError" in capsys.readouterr().out
+
+
+def test_read_job_without_the_work_still_saves_a_job(monkeypatch):
+    draft = JobDraft(customer_name="Mr Jones", customer_phone=None, address=None, work="")
+    use_fake_claude(monkeypatch, draft)
+
+    assert read_job("book mr jones friday 3pm")["work"] == "Job"

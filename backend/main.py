@@ -7,6 +7,7 @@ from twilio.request_validator import RequestValidator
 from twilio.twiml.messaging_response import MessagingResponse
 from twilio.twiml.voice_response import VoiceResponse
 
+import ai
 import settings
 from ai import change_quote, read_booking, read_job, read_quote
 from database import (
@@ -638,6 +639,8 @@ def whatsapp_reply(sender, body=""):
     client = get_client_by_owner(sender.removeprefix("whatsapp:"))
     if client is None or not client.active:
         return Reply(WHATSAPP_NOT_A_CLIENT)
+    # Any AI calls for this message are logged against this client.
+    ai.current_client_id.set(client.id)
 
     # A menu choice may arrive as its title, like "New quote", so use its command.
     body = command_for_title(body) or body.strip()
