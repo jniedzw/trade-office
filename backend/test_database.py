@@ -73,10 +73,10 @@ def test_update_client_changes_details_and_can_pause(monkeypatch, tmp_path):
     engine = use_temp_database(monkeypatch, tmp_path)
     add_client(engine, TWILIO_NUMBER)
 
-    database.update_client(1, "the tradesperson's Plumbing", "+447700900222", "New message", False)
+    database.update_client(1, "Dave's Plumbing", "+447700900222", "New message", False)
 
     client = database.get_client_by_number(TWILIO_NUMBER)
-    assert client.business_name == "the tradesperson's Plumbing"
+    assert client.business_name == "Dave's Plumbing"
     assert client.owner_mobile == "+447700900222"
     assert client.text_back_message == "New message"
     assert client.active is False
