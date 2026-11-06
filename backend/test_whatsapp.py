@@ -7,6 +7,7 @@ from sqlmodel import Session, select
 
 import database
 import diary
+import export
 import menu
 import quotes
 import settings
@@ -848,3 +849,32 @@ def test_markup(monkeypatch, tmp_path):
 
     text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "MARKUP lots")
     assert text.startswith("To set your materials markup")
+
+
+def test_export_sends_the_spreadsheet(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "Export my data")
+
+    assert text.startswith("Here's all your data")
+    assert link.startswith(f"{settings.PUBLIC_URL}/exports/1.xlsx?expires=")
+    response = client.get(path_of(link))
+    assert response.status_code == 200
+    assert response.headers["content-type"] == export.XLSX
+
+
+def test_an_export_link_stops_working_after_an_hour(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+    two_hours_ago = database.now_utc() - timedelta(hours=2)
+    link = quotes.signed_link("export", 1, two_hours_ago, lasts=export.LINK_LASTS, extension="xlsx")
+
+    assert client.get(path_of(link)).status_code == 403
+
+
+def test_a_quote_link_cant_open_an_export(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+    quote_link = quotes.signed_link("quote", 1, database.now_utc())
+
+    response = client.get(path_of(quote_link).replace("/quotes/1.pdf", "/exports/1.xlsx"))
+
+    assert response.status_code == 403

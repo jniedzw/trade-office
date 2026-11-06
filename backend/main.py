@@ -11,6 +11,7 @@ from alerts import alert_by_sms, alert_james, try_send
 from database import (
     create_tables,
     delete_old_calls,
+    everything_for,
     get_business_details,
     get_client,
     get_client_by_number,
@@ -30,6 +31,7 @@ from database import (
     save_pending_alert,
     whatsapp_alerts_on,
 )
+from export import XLSX, make_export
 from pdfs import make_invoice_pdf, make_quote_pdf
 from quotes import link_is_valid
 from sms import count_old_twilio_records, send_whatsapp_alert
@@ -303,6 +305,18 @@ def invoice_pdf(invoice_id: int, expires: int = 0, sig: str = ""):
     lines = get_quote_lines(quote.id)
     pdf = make_invoice_pdf(invoice, quote, business_name, lines, details)
     return Response(content=pdf, media_type="application/pdf")
+
+
+@app.get("/exports/{client_id}.xlsx")
+def export_file(client_id: int, expires: int = 0, sig: str = ""):
+    # Everything a client has, so only a link we signed in the last hour works.
+    if not link_is_valid("export", client_id, expires, sig, now_utc()):
+        raise HTTPException(status_code=403, detail="This link isn't valid")
+    client = get_client(client_id)
+    if client is None:
+        raise HTTPException(status_code=404, detail="Client not found")
+    spreadsheet = make_export(everything_for(client_id), client.markup_percent)
+    return Response(content=spreadsheet, media_type=XLSX)
 
 
 @app.post("/whatsapp-status")

@@ -578,6 +578,19 @@ def ai_calls_since(since):
         return session.exec(statement).all()
 
 
+def everything_for(client_id):
+    """Return all of a client's jobs, quotes, invoices and prices, oldest first."""
+    with Session(engine) as session:
+        jobs = session.exec(select(Job).where(Job.client_id == client_id).order_by(Job.time)).all()
+        quotes = session.exec(select(Quote).where(Quote.client_id == client_id).order_by(Quote.time)).all()
+        invoices = session.exec(
+            select(Invoice, Quote)
+            .where(Invoice.quote_id == Quote.id, Invoice.client_id == client_id)
+            .order_by(Invoice.number)
+        ).all()
+    return {"jobs": jobs, "quotes": quotes, "invoices": invoices, "prices": get_prices(client_id)}
+
+
 def get_job(job_id):
     """Return the job with this ID, or None."""
     with Session(engine) as session:

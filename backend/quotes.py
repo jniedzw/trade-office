@@ -113,11 +113,11 @@ def link_signature(kind, item_id, expires):
     return hmac.new(secret, message, hashlib.sha256).hexdigest()
 
 
-def signed_link(kind, item_id, now):
-    """Return a private link to a quote's or invoice's PDF that stops working after LINK_DAYS."""
-    expires = int((now + timedelta(days=LINK_DAYS)).timestamp())
+def signed_link(kind, item_id, now, lasts=timedelta(days=LINK_DAYS), extension="pdf"):
+    """Return a private link to a file that stops working once the time in lasts is up."""
+    expires = int((now + lasts).timestamp())
     signature = link_signature(kind, item_id, expires)
-    return f"{settings.PUBLIC_URL}/{kind}s/{item_id}.pdf?expires={expires}&sig={signature}"
+    return f"{settings.PUBLIC_URL}/{kind}s/{item_id}.{extension}?expires={expires}&sig={signature}"
 
 
 def link_is_valid(kind, item_id, expires, signature, now):

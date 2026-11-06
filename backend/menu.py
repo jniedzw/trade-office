@@ -15,6 +15,7 @@ MENU_CHOICES = [
     ("Who owes me", "OWED", "Unpaid invoices, oldest first"),
     ("Mark as paid", "PAID", "Record a payment"),
     ("My prices", "PRICES", "See your saved prices"),
+    ("Export my data", "EXPORT", "Everything as a spreadsheet"),
     ("Help", "HELP", "Everything you can send"),
 ]
 
@@ -38,6 +39,7 @@ HELP_TEXT = (
     "PRICE boiler service 85 to save a price\n"
     "PRICES to see your prices\n"
     "MARKUP 15 to add 15% to materials\n"
+    "EXPORT for all your data as a spreadsheet\n"
     "Or just say hi for the menu."
 )
 

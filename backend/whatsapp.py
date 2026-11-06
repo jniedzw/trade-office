@@ -6,6 +6,7 @@ main.py receives each message and hands it to whatsapp_reply here.
 from typing import NamedTuple
 
 import ai
+import export
 import settings
 from ai import change_quote, read_booking, read_job, read_quote
 from alerts import alert_james
@@ -209,7 +210,7 @@ def is_new_command(command):
     to 1300"), so only messages that can't be an answer count as commands.
     """
     words = command.split()
-    if command in ("ALERTS ON", "ALERTS OFF", "PRICES", "HELP", "OWED", "PAID", "WEEK"):
+    if command in ("ALERTS ON", "ALERTS OFF", "PRICES", "HELP", "OWED", "PAID", "WEEK", "EXPORT"):
         return True
     if words[:1] in (["QUOTE"], ["LOG"], ["BOOK"]):
         return True
@@ -436,6 +437,15 @@ def week_reply(client):
     return Reply(f"Your week:\n{week}" if week else "Nothing booked for the next 7 days.")
 
 
+def export_reply(client):
+    """Send the client all their data as a spreadsheet."""
+    if not settings.QUOTE_LINK_SECRET:
+        alert_james(client, "couldn't export: QUOTE_LINK_SECRET isn't set.")
+        return Reply("Sorry, exports aren't working right now. We've been told.")
+    link = signed_link("export", client.id, now_utc(), lasts=export.LINK_LASTS, extension="xlsx")
+    return Reply("Here's all your data: jobs, quotes, invoices and prices.", link)
+
+
 def alerts_reply(client, details):
     """Turn WhatsApp alerts on or off."""
     if details.strip().upper() == "ON":
@@ -463,6 +473,7 @@ COMMANDS = {
     "OWED": lambda client, rest: owed_reply(client),
     "BOOK": lambda client, rest: book_reply(client, rest),
     "WEEK": lambda client, rest: week_reply(client),
+    "EXPORT": lambda client, rest: export_reply(client),
 }
 
 
