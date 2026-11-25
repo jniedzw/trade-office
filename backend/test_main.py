@@ -56,7 +56,9 @@ def use_fakes(monkeypatch, tmp_path, active=True, failing=()):
     monkeypatch.setattr(settings, "WHATSAPP_JOB_BUTTONS", None)
     monkeypatch.setattr(settings, "WHATSAPP_OWED_BUTTONS", None)
     # Photos are "downloaded" without reaching Twilio.
-    monkeypatch.setattr(whatsapp, "download_media", lambda link: b"photo-bytes")
+    monkeypatch.setattr(whatsapp, "download_media", lambda link, max_bytes=None: b"photo-bytes")
+    # Voice notes are never really sent to AssemblyAI from a test.
+    monkeypatch.setattr(whatsapp, "transcribe", lambda audio, kind: None)
     # The cleanup job must never reach the real Twilio account from a test.
     monkeypatch.setattr(main, "count_old_twilio_records", lambda cutoff: (0, 0))
 

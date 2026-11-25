@@ -67,6 +67,8 @@ backend/
   diary.py         # bookings in UK time and the week ahead
   export.py        # a client's data as an Excel spreadsheet
   weekly.py        # the Sunday 6pm week-ahead update
+  reviews.py       # one review request after a job, only with the customer's consent
+  voice.py         # voice notes to text, with AssemblyAI's EU service
   ai.py            # read rough messages (quotes, jobs, bookings) with Claude
   eval_quotes.py   # check the AI against 27 made-up quote messages (costs about 25p)
   eval_bookings.py # check the AI's reading of dates and times (costs about 1p)

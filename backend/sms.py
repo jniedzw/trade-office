@@ -76,13 +76,13 @@ def send_weekly_update(to: str, jobs: str, owed: str) -> str:
 MAX_PHOTO_BYTES = 5 * 1024 * 1024
 
 
-def download_media(url: str) -> bytes | None:
-    """Download a photo someone sent us on WhatsApp, or return None if it's too big or fails."""
+def download_media(url: str, max_bytes: int = MAX_PHOTO_BYTES) -> bytes | None:
+    """Download a photo or voice note sent to us on WhatsApp, or None if it's too big or fails."""
     # Twilio only hands media over to us, so we prove who we are with our API key.
     response = requests.get(
         url, auth=(settings.TWILIO_API_KEY_SID, settings.TWILIO_API_KEY_SECRET), timeout=20
     )
-    if response.status_code != 200 or len(response.content) > MAX_PHOTO_BYTES:
+    if response.status_code != 200 or len(response.content) > max_bytes:
         return None
     return response.content
 

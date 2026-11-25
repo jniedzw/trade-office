@@ -1316,7 +1316,7 @@ def test_a_photo_on_its_own_gets_asked_what_to_do(monkeypatch, tmp_path):
     assert text == whatsapp.PHOTO_HELP
 
 
-def test_a_voice_note_gets_a_polite_no_for_now(monkeypatch, tmp_path):
+def test_a_voice_note_without_the_service_gets_a_polite_no(monkeypatch, tmp_path):
     use_fakes(monkeypatch, tmp_path)
 
     text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "", [("https://x/ME2", "audio/ogg")])
@@ -1341,3 +1341,40 @@ def test_photos_arrive_through_the_webhook(monkeypatch, tmp_path):
     response = client.post("/whatsapp", data=form, headers={"X-Twilio-Signature": signature})
 
     assert "Got your photo" in response.text
+
+
+VOICE = [("https://api.twilio.com/media/ME9", "audio/ogg; codecs=opus")]
+
+
+def hear(monkeypatch, words):
+    """Make every voice note sound like these words."""
+    monkeypatch.setattr(whatsapp, "transcribe", lambda audio, kind: words)
+
+
+def test_a_voice_note_is_handled_like_typing(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    hear(monkeypatch, "Hi Jack, can you log Mrs Jones | Leaking radiator")
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "", VOICE)
+
+    assert text == (
+        'I heard: "Hi Jack, can you log Mrs Jones | Leaking radiator"\n\n'
+        "Job J1 logged: Mrs Jones, Leaking radiator."
+    )
+
+
+def test_a_voice_note_without_a_command_says_how_to_start(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    hear(monkeypatch, "Mrs Jones rang about her boiler")
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "", VOICE)
+
+    assert text.startswith('I heard: "Mrs Jones rang about her boiler"\n\nStart with what you')
+
+
+def test_a_voice_note_that_cant_be_heard(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "", VOICE)
+
+    assert text == whatsapp.VOICE_NOT_YET

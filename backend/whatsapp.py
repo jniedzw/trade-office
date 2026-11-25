@@ -72,6 +72,7 @@ from quotes import (
     to_pence,
 )
 from sms import download_media, send_whatsapp, send_whatsapp_buttons
+from voice import from_the_command, transcribe
 
 # Far more quotes than a tradesperson makes in a day, so only a fault or misuse hits it.
 MAX_QUOTES_PER_DAY = 50
@@ -840,8 +841,29 @@ PHOTO_HELP = (
     "Got your photo. What should I do with it? Send it again with a caption, like:\n"
     "QUOTE Mrs Jones bathroom, 3 days, 650 materials\nLOG Mrs Jones, leaking radiator"
 )
-VOICE_NOT_YET = "I can't listen to voice notes yet, sorry. Please type it out, like: QUOTE Mrs Jones bathroom 1250"
+VOICE_NOT_YET = "Sorry, I couldn't make out that voice note. Please type it out, like: QUOTE Mrs Jones bathroom 1250"
 OTHER_FILES = "I can only read photos and messages for now. Please type it out, or send a photo."
+
+
+# Voice notes up to this size, a few minutes long.
+MAX_VOICE_BYTES = 20 * 1024 * 1024
+
+
+def voice_reply(sender, link, kind):
+    """Turn a voice note into words, then handle it as if they'd been typed.
+
+    Jack starts by saying what he heard, so a mishearing is easy to spot.
+    """
+    audio = download_media(link, max_bytes=MAX_VOICE_BYTES)
+    heard = transcribe(audio, kind) if audio else None
+    if heard is None:
+        return Reply(VOICE_NOT_YET)
+    reply = whatsapp_reply(sender, from_the_command(heard, COMMANDS))
+    note = f'I heard: "{heard}"'
+    if reply.text in (HELP_TEXT, MENU_TEXT):
+        # Nothing to do from it, so say how to start rather than showing the menu.
+        return Reply(f"{note}\n\nStart with what you'd like, like QUOTE, LOG or BOOK, and I'll do it.")
+    return reply._replace(text=f"{note}\n\n{reply.text}")
 
 
 def whatsapp_reply(sender, body="", media=()):
@@ -860,9 +882,10 @@ def whatsapp_reply(sender, body="", media=()):
     photos = [(kind, download_media(link)) for link, kind in media if kind in PHOTO_TYPES]
     photos = [(kind, data) for kind, data in photos if data]
     ai.current_photos.set(tuple(photos))
+    voice_notes = [(link, kind) for link, kind in media if kind.startswith("audio/")]
+    if voice_notes and not body.strip():
+        return voice_reply(sender, *voice_notes[0])
     if media and not body.strip():
-        if any(kind.startswith("audio/") for link, kind in media):
-            return Reply(VOICE_NOT_YET)
         return Reply(PHOTO_HELP if photos else OTHER_FILES)
 
     # A menu choice may arrive as its title, like "New quote", so use its command.
