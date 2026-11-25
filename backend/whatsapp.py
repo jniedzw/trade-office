@@ -12,6 +12,7 @@ import settings
 from ai import change_quote, read_booking, read_job, read_quote, uk_mobile
 from alerts import alert_james, try_send
 from database import (
+    create_admin_link,
     quotes_for_job,
     mark_reminded,
     is_opted_out,
@@ -872,7 +873,12 @@ def whatsapp_reply(sender, body="", media=()):
     media is a list of (link, type) for anything attached, like a photo.
     """
     # Twilio writes WhatsApp numbers as "whatsapp:+447...", so take that off first.
-    client = get_client_by_owner(sender.removeprefix("whatsapp:"))
+    number = sender.removeprefix("whatsapp:")
+    # James's admin login, only ever from his own alert mobile.
+    if settings.ALERT_MOBILE and number == settings.ALERT_MOBILE and body.strip().upper() == "ADMIN":
+        token = create_admin_link()
+        return Reply(f"Admin login: {settings.PUBLIC_URL}/admin/login/{token}\nWorks once, for 15 minutes.")
+    client = get_client_by_owner(number)
     if client is None or not client.active:
         return Reply(WHATSAPP_NOT_A_CLIENT)
     # Any AI calls for this message are logged against this client.

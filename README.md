@@ -58,6 +58,7 @@ backend/
   whatsapp.py      # Jack's WhatsApp commands and replies
   alerts.py        # send texts safely and alert me when something fails
   web.py           # the tradesperson's own web pages and login
+  admin.py         # my admin pages for managing clients
   templates/       # the HTML for those pages
   database.py      # SQLModel tables (clients, calls, jobs, quotes, invoices) and lookups
   sms.py           # send_sms() using the Twilio client

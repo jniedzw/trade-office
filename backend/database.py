@@ -24,6 +24,8 @@ UNDO_HOURS = 24
 # A login link works for this many minutes, and a login lasts this many days.
 LOGIN_LINK_MINUTES = 15
 SESSION_DAYS = 30
+# Admin can change any client, so its logins are kept short.
+ADMIN_SESSION_HOURS = 12
 
 
 class Client(SQLModel, table=True):
@@ -251,6 +253,17 @@ class UndoStep(SQLModel, table=True):
     # The rows as they were before, as JSON: [{"table": "job", "id": 4, "fields": {...}}].
     before: str
     time: datetime = Field(default_factory=now_utc)
+
+
+class AdminLogin(SQLModel, table=True):
+    """James's admin access: a one-time link, or a logged-in browser. Only hashes are kept."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    token_hash: str = Field(unique=True, index=True)
+    # "link" until it's used to log in, then a separate "session" row for the browser.
+    kind: str
+    expires_at: datetime
+    used_at: datetime | None = None
 
 
 class PendingQuestion(SQLModel, table=True):
@@ -1129,6 +1142,90 @@ def add_skip_number(client_id, number):
         session.add(SkipNumber(client_id=client_id, number=number))
         session.commit()
     return True
+
+
+def skip_numbers(client_id):
+    """Return the numbers on this client's family and friends list."""
+    with Session(engine) as session:
+        statement = select(SkipNumber.number).where(SkipNumber.client_id == client_id).order_by(SkipNumber.number)
+        return list(session.exec(statement).all())
+
+
+def remove_skip_number(client_id, number):
+    """Take a number off the client's family and friends list."""
+    with Session(engine) as session:
+        statement = select(SkipNumber).where(SkipNumber.client_id == client_id, SkipNumber.number == number)
+        row = session.exec(statement).first()
+        if row is not None:
+            session.delete(row)
+            session.commit()
+
+
+def all_clients():
+    """Return every client, newest first."""
+    with Session(engine) as session:
+        return session.exec(select(Client).order_by(Client.id.desc())).all()
+
+
+def add_client(business_name, owner_mobile, twilio_number, text_back_message):
+    """Add a client and return their ID, or None if that Twilio number is already used."""
+    if get_client_by_number(twilio_number) is not None:
+        return None
+    client = Client(
+        business_name=business_name,
+        owner_mobile=owner_mobile,
+        twilio_number=twilio_number,
+        text_back_message=text_back_message,
+    )
+    with Session(engine) as session:
+        session.add(client)
+        session.commit()
+        session.refresh(client)
+        return client.id
+
+
+def create_admin_link():
+    """Save a one-time admin login link, and return its secret token."""
+    token = secrets.token_urlsafe(32)
+    with Session(engine) as session:
+        session.add(AdminLogin(
+            token_hash=hash_token(token), kind="link",
+            expires_at=now_utc() + timedelta(minutes=LOGIN_LINK_MINUTES),
+        ))
+        session.commit()
+    return token
+
+
+def start_admin_session(link_token):
+    """Use up an admin link and return a token for the admin cookie, or None if the link's no good."""
+    with Session(engine) as session:
+        statement = select(AdminLogin).where(
+            AdminLogin.token_hash == hash_token(link_token), AdminLogin.kind == "link"
+        )
+        link = session.exec(statement).first()
+        if link is None or link.used_at is not None or as_utc(link.expires_at) < now_utc():
+            return None
+        link.used_at = now_utc()
+        session.add(link)
+        token = secrets.token_urlsafe(32)
+        session.add(AdminLogin(
+            token_hash=hash_token(token), kind="session",
+            expires_at=now_utc() + timedelta(hours=ADMIN_SESSION_HOURS),
+        ))
+        session.commit()
+        return token
+
+
+def is_admin(cookie):
+    """Return True if this cookie is a live admin login."""
+    if not cookie:
+        return False
+    with Session(engine) as session:
+        statement = select(AdminLogin).where(
+            AdminLogin.token_hash == hash_token(cookie), AdminLogin.kind == "session"
+        )
+        login = session.exec(statement).first()
+        return login is not None and as_utc(login.expires_at) > now_utc()
 
 
 def update_client(client_id, business_name, owner_mobile, text_back_message, active):

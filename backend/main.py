@@ -6,6 +6,7 @@ from twilio.request_validator import RequestValidator
 from twilio.twiml.messaging_response import MessagingResponse
 from twilio.twiml.voice_response import VoiceResponse
 
+import admin
 import settings
 import web
 from alerts import alert_by_sms, alert_james, try_send
@@ -89,8 +90,9 @@ async def lifespan(app):
 
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
-# The tradesperson's own pages live in web.py.
+# The tradesperson's own pages live in web.py, and James's admin pages in admin.py.
 app.include_router(web.router)
+app.include_router(admin.router)
 create_tables()  # Make sure the tables exist when the app starts
 validator = RequestValidator(settings.TWILIO_AUTH_TOKEN)
 

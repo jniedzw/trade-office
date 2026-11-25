@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Admin · Ask Jack{% endblock %}
+{% block header %}<strong>Ask Jack admin</strong>{% endblock %}
+{% block content %}
+{% if error %}<div class="card late">{{ error }}</div>{% endif %}
+<h2>Clients</h2>
+<div class="card">
+  {% for row in rows %}
+  <div class="job">
+    <a href="/admin/clients/{{ row.client.id }}"><strong>{{ row.client.business_name }}</strong></a>
+    {% if not row.client.active %}<span class="late">· paused</span>{% endif %}
+    <br><span class="muted">{{ row.jobs }} jobs · {{ row.quotes }} quotes · {{ row.invoices }} invoices · AI {{ row.ai_cost }} this month</span>
+  </div>
+  {% else %}
+  <p class="muted">No clients yet.</p>
+  {% endfor %}
+</div>
+
+<h2>Add a client</h2>
+<form method="post" action="/admin/clients" class="card">
+  <label>Business name<br><input name="business_name" required></label><br><br>
+  <label>Their mobile<br><input name="owner_mobile" placeholder="07700 900123" required></label><br><br>
+  <label>Their Twilio number<br><input name="twilio_number" placeholder="+447..." required></label><br><br>
+  <button type="submit">Add client</button>
+</form>
+{% endblock %}

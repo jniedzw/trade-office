@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}{{ client_row.business_name }} · Admin{% endblock %}
+{% block header %}<strong><a href="/admin" style="color: inherit;">Ask Jack admin</a></strong> · {{ client_row.business_name }}{% endblock %}
+{% block content %}
+{% if error %}<div class="card late">{{ error }}</div>{% endif %}
+{% if saved %}<div class="card">Saved.</div>{% endif %}
+
+<h2>Client</h2>
+<form method="post" action="/admin/clients/{{ client_row.id }}" class="card">
+  <label>Business name<br><input name="business_name" value="{{ client_row.business_name }}" required></label><br><br>
+  <label>Their mobile<br><input name="owner_mobile" value="{{ client_row.owner_mobile }}" required></label><br><br>
+  <p class="muted">Twilio number: {{ client_row.twilio_number }}</p>
+  <label>Text-back message<br><textarea name="text_back_message" rows="3" style="width: 100%;" required>{{ client_row.text_back_message }}</textarea></label><br><br>
+  <label><input type="checkbox" name="active" value="yes" {% if client_row.active %}checked{% endif %}> Active (untick to pause)</label><br><br>
+  <button type="submit">Save client</button>
+</form>
+
+<h2>Quotes and invoices</h2>
+<form method="post" action="/admin/clients/{{ client_row.id }}/details" class="card">
+  <label>Legal name<br><input name="legal_name" value="{{ details.legal_name if details else '' }}" placeholder="Dave Smith t/a Dave's Plumbing"></label><br><br>
+  <label>Business address<br><textarea name="address" rows="3" style="width: 100%;">{{ details.address if details else '' }}</textarea></label><br><br>
+  <label>Reference letters<br><input name="ref_letters" value="{{ details.ref_letters if details else '' }}" placeholder="DPL"></label><br><br>
+  <label>Days to pay<br><input name="payment_days" value="{{ details.payment_days if details else 14 }}"></label><br><br>
+  <label>Bank details<br><textarea name="bank_details" rows="3" style="width: 100%;">{{ details.bank_details if details else '' }}</textarea></label><br><br>
+  <label>Phone or email for customers<br><input name="contact" value="{{ details.contact if details else '' }}"></label><br><br>
+  <label>Colour<br><input name="brand_colour" value="{{ details.brand_colour if details else '#b8975a' }}"></label><br><br>
+  <label>Next invoice number<br><input name="invoice_start" value="{{ details.invoice_start if details else 1 }}"></label><br><br>
+  <label>Google review link (blank for no review requests)<br><input name="review_link" value="{{ details.review_link if details else '' }}"></label><br><br>
+  <button type="submit">Save details</button>
+</form>
+
+<h2>Family and friends (never texted)</h2>
+<div class="card">
+  {% for number in skip %}
+  <form method="post" action="/admin/clients/{{ client_row.id }}/skip/remove" class="job">
+    {{ number }} <input type="hidden" name="number" value="{{ number }}">
+    <button class="quiet" type="submit">Remove</button>
+  </form>
+  {% else %}
+  <p class="muted">None yet.</p>
+  {% endfor %}
+  <form method="post" action="/admin/clients/{{ client_row.id }}/skip">
+    <input name="number" placeholder="07700 900123"> <button class="quiet" type="submit">Add</button>
+  </form>
+</div>
+
+<h2>Delete</h2>
+<form method="post" action="/admin/clients/{{ client_row.id }}/delete" class="card">
+  <p class="muted">Deletes everything for this client. Have they had their EXPORT first? Type the business name to confirm.</p>
+  <input name="confirm" placeholder="{{ client_row.business_name }}"> <button class="quiet" type="submit">Delete client</button>
+</form>
+{% endblock %}
