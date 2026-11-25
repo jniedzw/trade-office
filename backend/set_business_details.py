@@ -45,6 +45,7 @@ def main():
     payment_days = int(input("Days to pay an invoice (Enter for 14): ").strip() or 14)
     bank_details = ask_lines("Bank details for invoices")
     contact = input("Phone or email for customers: ").strip()
+    review_link = input("Their Google review link (Enter to skip review requests): ").strip()
     # Carry on from their own invoices: if their last was INV-0243, this is 244.
     invoice_start = input("Number for their next invoice (Enter for 1): ").strip() or "1"
     while not invoice_start.isdigit():
@@ -63,6 +64,7 @@ def main():
         brand_colour=brand_colour,
         contact=contact,
         invoice_start=int(invoice_start),
+        review_link=review_link,
     )
     print(f"Saved details for {client.business_name}.")
 

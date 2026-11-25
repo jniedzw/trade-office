@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -86,13 +86,13 @@ def see_quote(request: Request, quote_id: int, expires: int = 0, sig: str = ""):
 
 
 @router.post("/q/{quote_id}", response_class=HTMLResponse)
-def accept(request: Request, quote_id: int, expires: int = 0, sig: str = ""):
+def accept(request: Request, quote_id: int, expires: int = 0, sig: str = "", review_ok: str = Form("")):
     found = customer_quote(request, quote_id, expires, sig)
     if not found:
         return link_gone(request)
     quote, client = found
     # Only the first press tells the tradesperson, however many times it's pressed.
-    if accept_quote(quote.id):
+    if accept_quote(quote.id, review_ok=review_ok == "yes"):
         # A text, not WhatsApp: Jack can't start a WhatsApp chat without a template.
         try_send(
             client.owner_mobile,

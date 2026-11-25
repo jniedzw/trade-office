@@ -284,3 +284,23 @@ def test_a_draft_has_no_customer_page(monkeypatch, tmp_path):
     path = sent_quote(monkeypatch, tmp_path, status="draft")
 
     assert client.get(path).status_code == 403
+
+
+def test_ticking_the_review_box_records_consent(monkeypatch, tmp_path):
+    path = sent_quote(monkeypatch, tmp_path)
+    monkeypatch.setattr(alerts, "send_sms", lambda to, body, from_number: None)
+
+    client.post(path, data={"review_ok": "yes"})
+
+    assert database.get_quote(1).review_ok is True
+
+
+def test_the_review_box_starts_unticked(monkeypatch, tmp_path):
+    path = sent_quote(monkeypatch, tmp_path)
+    monkeypatch.setattr(alerts, "send_sms", lambda to, body, from_number: None)
+
+    page = client.get(path).text
+    client.post(path)
+
+    assert 'name="review_ok" value="yes"' in page and "checked" not in page
+    assert database.get_quote(1).review_ok is False

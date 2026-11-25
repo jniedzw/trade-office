@@ -12,6 +12,7 @@ import settings
 from ai import change_quote, read_booking, read_job, read_quote, uk_mobile
 from alerts import alert_james, try_send
 from database import (
+    quotes_for_job,
     mark_reminded,
     is_opted_out,
     mark_quote_sent,
@@ -783,6 +784,9 @@ def done_reply(client, details):
     remember(client, f"{job_label(job.number)} marked done", ("job", job.id, ["status", "done_at"]))
     mark_job_done(job.id)
     text = f"Done: {job_label(job.number)}, {job.customer_name}, {job.work}. Nice one."
+    details = get_business_details(client.id)
+    if details and details.review_link and any(q.review_ok for q in quotes_for_job(job.id)):
+        text += f" {job.customer_name} said yes to a review request, so I'll text them tomorrow."
     quote = final_quote_for_job(job.id)
     if quote is not None and get_invoice_for_quote(quote.id) is None:
         # The Make invoice button, since that's usually what comes next.

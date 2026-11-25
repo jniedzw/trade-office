@@ -115,6 +115,8 @@ class Quote(SQLModel, table=True):
     customer_phone: str | None = None
     sent_at: datetime | None = None
     accepted_at: datetime | None = None
+    # True only if the customer ticked the box saying they're happy to be asked for a review.
+    review_ok: bool = False
 
 
 class QuoteLine(SQLModel, table=True):
@@ -145,6 +147,8 @@ class BusinessDetails(SQLModel, table=True):
     contact: str = ""
     # The number of their first Ask Jack invoice, so it carries on from their own.
     invoice_start: int = 1
+    # Their Google review link, or "" if they don't want review requests sent.
+    review_link: str = ""
 
 
 class Invoice(SQLModel, table=True):
@@ -186,6 +190,8 @@ class Job(SQLModel, table=True):
     number: int | None = None
     # When the tradesperson said the work was finished, or None.
     done_at: datetime | None = None
+    # When the customer was asked for a review, so it only happens once.
+    review_asked_at: datetime | None = None
 
 
 class PriceItem(SQLModel, table=True):
@@ -277,6 +283,9 @@ NEW_COLUMNS = [
     ("quote", "sent_at", "DATETIME"),
     ("quote", "accepted_at", "DATETIME"),
     ("invoice", "reminded_at", "DATETIME"),
+    ("quote", "review_ok", "BOOLEAN NOT NULL DEFAULT 0"),
+    ("job", "review_asked_at", "DATETIME"),
+    ("businessdetails", "review_link", "VARCHAR NOT NULL DEFAULT ''"),
 ]
 
 
@@ -943,16 +952,54 @@ def mark_quote_sent(quote_id, phone):
         session.commit()
 
 
-def accept_quote(quote_id):
-    """Record that the customer accepted a quote. Return False if they already had."""
+def accept_quote(quote_id, review_ok=False):
+    """Record that the customer accepted a quote, and whether they'll be asked for a review.
+
+    Return False if they'd already accepted it.
+    """
     with Session(engine) as session:
         quote = session.get(Quote, quote_id)
         if quote.accepted_at is not None:
             return False
         quote.accepted_at = now_utc()
+        quote.review_ok = review_ok
         session.add(quote)
         session.commit()
         return True
+
+
+# A review request goes this many hours after the job's marked done...
+REVIEW_AFTER_HOURS = 20
+# ...and not at all once this many days have passed.
+REVIEW_WITHIN_DAYS = 7
+
+
+def review_requests_due(now):
+    """Return (job, quote) pairs whose customer said yes to a review and hasn't been asked yet."""
+    with Session(engine) as session:
+        statement = (
+            select(Job, Quote)
+            .where(Quote.job_id == Job.id, Quote.review_ok == True)  # noqa: E712
+            .where(Job.done_at != None, Job.review_asked_at == None)  # noqa: E711
+            .where(Job.done_at <= now - timedelta(hours=REVIEW_AFTER_HOURS))
+            .where(Job.done_at >= now - timedelta(days=REVIEW_WITHIN_DAYS))
+        )
+        return session.exec(statement).all()
+
+
+def mark_review_asked(job_id):
+    """Record that the customer was asked for a review, so it isn't sent twice."""
+    with Session(engine) as session:
+        job = session.get(Job, job_id)
+        job.review_asked_at = now_utc()
+        session.add(job)
+        session.commit()
+
+
+def quotes_for_job(job_id):
+    """Return every quote made for a job."""
+    with Session(engine) as session:
+        return session.exec(select(Quote).where(Quote.job_id == job_id)).all()
 
 
 def final_quote_for_job(job_id):
