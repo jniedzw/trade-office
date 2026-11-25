@@ -340,6 +340,62 @@ def test_nobody_can_open_another_clients_pdfs(monkeypatch, tmp_path):
         assert client.get(path).status_code == 401, path
 
 
+def test_job_done_button_marks_the_job_done_and_undo_puts_it_back(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    job_id = book_today(1, "Mrs Jones", "Leaking radiator")
+    cookie = as_cookie(log_in())
+    assert 'action="/jobs/1/done"' in client.get("/me", headers=cookie).text
+
+    response = client.post("/jobs/1/done", data={"back": "/me"}, headers=cookie, follow_redirects=False)
+
+    assert response.headers["location"] == "/me?did=done&n=1"
+    assert database.get_job(job_id).status == "done"
+    page = client.get(response.headers["location"], headers=cookie).text
+    assert "J1 marked done." in page and 'action="/undo"' in page
+    assert 'action="/jobs/1/done"' not in page
+
+    client.post("/undo", data={"back": "/me"}, headers=cookie, follow_redirects=False)
+    assert database.get_job(job_id).status == "booked"
+
+
+def test_mark_as_paid_button(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    quote_id = database.save_quote(1, "Mrs Jones", "Radiator", "RAD", 45000)
+    database.save_invoice(1, quote_id, "12 Test Road")
+    cookie = as_cookie(log_in())
+    assert 'action="/invoices/1/paid"' in client.get("/money", headers=cookie).text
+
+    response = client.post("/invoices/1/paid", data={"back": "/money"}, headers=cookie, follow_redirects=False)
+
+    assert database.unpaid_invoices(1) == []
+    assert "INV-0001 marked as paid." in client.get(response.headers["location"], headers=cookie).text
+
+
+def test_buttons_only_go_back_to_our_own_pages(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    book_today(1, "Mrs Jones", "Leaking radiator")
+    cookie = as_cookie(log_in())
+
+    for where in ["https://example.com", "//example.com", "/customers/1/../../evil"]:
+        response = client.post("/jobs/1/done", data={"back": where}, headers=cookie, follow_redirects=False)
+        assert response.headers["location"].startswith("/me?"), where
+
+
+def test_nobody_can_finish_or_mark_paid_another_clients_work(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    add_other_client()
+    job_id = book_today(2, "Their Customer", "Their job")
+    quote_id = database.save_quote(2, "Their Customer", "Their work", "TW", 31337)
+    database.save_invoice(2, quote_id, "Their Road")
+    cookie = as_cookie(log_in(OWNER))
+
+    client.post("/jobs/1/done", headers=cookie, follow_redirects=False)
+    client.post("/invoices/1/paid", headers=cookie, follow_redirects=False)
+
+    assert database.get_job(job_id).status == "booked"
+    assert len(database.unpaid_invoices(2)) == 1
+
+
 def test_money_page(monkeypatch, tmp_path):
     use_fakes(monkeypatch, tmp_path)
     for name, pence in [("Mrs Jones", 125050), ("Mr Smith", 8500)]:
@@ -384,7 +440,7 @@ def test_every_page_needs_logging_in(monkeypatch, tmp_path):
 
     for path in ["/me", "/customers", "/customers/1", "/money", "/download"]:
         assert client.get(path).status_code == 401, path
-    for path in ["/customers/1/notes", "/customers/1/details"]:
+    for path in ["/customers/1/notes", "/customers/1/details", "/jobs/1/done", "/invoices/1/paid", "/undo"]:
         assert client.post(path).status_code == 401, path
 
 

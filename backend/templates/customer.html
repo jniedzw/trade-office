@@ -47,7 +47,11 @@
   <div class="job money-line">
     <span>{{ job.work }}{% if job.starts_at %}<br><span class="muted">Booked {{ day_name(job.starts_at) }}</span>{% endif %}</span>
     <span><span class="tag{% if job.status in ('done', 'invoiced', 'paid') %} done{% endif %}">{{ job.status | capitalize }}</span>
-      {% if job.number %}<span class="tag">J{{ job.number }}</span>{% endif %}</span>
+      {% if job.number %}<span class="tag">J{{ job.number }}</span>{% endif %}
+      {% if not job.done_at and job.status in ("logged", "quoted", "booked") %}
+      <form class="inline" method="post" action="/jobs/{{ job.number }}/done"><input type="hidden" name="back" value="/customers/{{ customer.id }}">
+        <button class="small" type="submit">Job done</button></form>
+      {% endif %}</span>
   </div>
   {% else %}
   <p class="muted">No jobs yet.</p>
@@ -72,7 +76,10 @@
   {% for invoice, quote in customer.invoice_list %}
   <div class="job money-line">
     <span><a class="name" href="/my/invoices/{{ invoice.id }}.pdf">{{ invoice_label(invoice.number) }}</a>: {{ money(quote.total_pence) }}</span>
-    {% if invoice.paid_at %}<span class="tag done">Paid {{ day_name(invoice.paid_at) }}</span>{% else %}<span class="tag late">Unpaid</span>{% endif %}
+    {% if invoice.paid_at %}<span class="tag done">Paid {{ day_name(invoice.paid_at) }}</span>{% else %}
+    <span><span class="tag late">Unpaid</span>
+      <form class="inline" method="post" action="/invoices/{{ invoice.number }}/paid"><input type="hidden" name="back" value="/customers/{{ customer.id }}">
+        <button class="small" type="submit">Mark as paid</button></form></span>{% endif %}
   </div>
   {% else %}
   <p class="muted">No invoices yet.</p>

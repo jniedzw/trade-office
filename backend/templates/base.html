@@ -75,6 +75,12 @@
     .day { font-size: .8rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 14px 0 0; }
     .day:first-child { margin-top: 0; }
     .money-line { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+    /* Small buttons that sit in a list, like Job done. */
+    button.small { width: auto; padding: 7px 12px; font-size: .85rem; }
+    button.light { background: #fff; color: var(--ink); border: 1px solid #cbd5e1; }
+    .actions form { flex: 1; margin: 0; }
+    .actions button { padding: 9px; font-size: .9rem; }
+    form.inline { display: inline; margin: 0; }
     a.name { color: var(--brand-text); text-decoration: none; font-weight: 600; }
     .tip { font-size: .85rem; color: var(--muted); text-align: center; margin: 24px 0 8px; }
     input[type=search] { font: inherit; width: 100%; box-sizing: border-box; padding: 10px 12px;
@@ -95,6 +101,15 @@
     {% endblock %}
   </header>
   <main>
+    {% if flash %}
+    <div class="notice money-line">
+      <span>{{ flash }}</span>
+      {% if request.query_params.get("did") in ("done", "paid") %}
+      <form method="post" action="/undo"><input type="hidden" name="back" value="{{ request.url.path }}">
+        <button class="small light" type="submit">Undo</button></form>
+      {% endif %}
+    </div>
+    {% endif %}
     {% block content %}{% endblock %}
   </main>
 </body>

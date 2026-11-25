@@ -12,7 +12,9 @@
   <div class="job money-line">
     <span><strong>{{ invoice.customer_name }}</strong> <span class="tag">{{ invoice.label }}</span>
       {% if invoice.overdue > 0 %}<br><span class="tag late">{{ invoice.overdue }} day{{ "" if invoice.overdue == 1 else "s" }} overdue</span>{% endif %}</span>
-    <strong>{{ invoice.amount }}</strong>
+    <span><strong>{{ invoice.amount }}</strong><br>
+      <form class="inline" method="post" action="/invoices/{{ invoice.number }}/paid"><input type="hidden" name="back" value="/money">
+        <button class="small" type="submit">Mark as paid</button></form></span>
   </div>
   {% else %}
   <p class="muted">Nobody owes you anything.</p>

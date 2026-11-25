@@ -1,5 +1,6 @@
 """The tradesperson's own web pages, logged into from a one-time WhatsApp link."""
 
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, Form, Request, Response
@@ -18,6 +19,7 @@ from database import (
     client_for_session,
     customers_for,
     get_customer,
+    get_job_by_number,
     get_invoice,
     save_customer_details,
     save_customer_notes,
@@ -32,7 +34,8 @@ from database import (
 from diary import day_name, to_uk, uk_now, week_days
 from export import XLSX, make_export
 from pdfs import make_invoice_pdf, make_quote_pdf
-from quotes import invoice_label, link_is_valid, money, quote_label, signed_link
+import whatsapp
+from quotes import invoice_label, job_label, link_is_valid, money, quote_label, signed_link
 
 router = APIRouter()
 # Found next to this file, whichever folder the server is started from.
@@ -43,7 +46,24 @@ COOKIE = "session"
 
 def page(request, name, status_code=200, **values):
     """Return one of the HTML templates, filled in with values."""
+    values.setdefault("flash", flash_for(request))
     return templates.TemplateResponse(request, name, values, status_code=status_code)
+
+
+def flash_for(request):
+    """Return the green bar after a button was tapped, like "J4 marked done.", or None.
+
+    Only a word and a number come in the address, never a name, so nothing personal
+    ends up in web addresses or logs.
+    """
+    did, number = request.query_params.get("did"), request.query_params.get("n", "")
+    number = int(number) if number.isdigit() else 0
+    return {
+        "done": f"{job_label(number)} marked done.",
+        "paid": f"{invoice_label(number)} marked as paid.",
+        "undone": "Undone.",
+        "nothing": "There was nothing to undo.",
+    }.get(did)
 
 
 def logged_out(request):
@@ -251,6 +271,7 @@ def money_page(request: Request):
     days_to_pay = payment_days(client)
     owed = [
         {
+            "number": invoice["number"],
             "label": invoice_label(invoice["number"]),
             "customer_name": invoice["customer_name"],
             "amount": money(invoice["total_pence"]),
@@ -319,6 +340,50 @@ def my_invoice_pdf(request: Request, invoice_id: int):
         return page(request, "message.html", status_code=404, client=client,
                     heading="Invoice not found", text="It may have been removed.")
     return pdf_response(invoice_pdf_for(invoice), f"{invoice_label(invoice.number)}.pdf")
+
+
+def back_to(where, did, number=0):
+    """Return a redirect to the page the button was on, saying what happened.
+
+    where comes from the form, so only our own pages are allowed: anything else goes
+    to Today, so a link elsewhere can't use this to send someone to another site.
+    """
+    if not (where in ("/me", "/money") or re.fullmatch(r"/customers/\d+", where)):
+        where = "/me"
+    return RedirectResponse(f"{where}?did={did}&n={number}", status_code=303)
+
+
+@router.post("/jobs/{number}/done")
+def job_done(request: Request, number: int, back: str = Form("/me")):
+    """The Job done button: the same as sending DONE J4 on WhatsApp, so UNDO works too."""
+    client = logged_in_client(request)
+    if client is None:
+        return logged_out(request)
+    job = get_job_by_number(client.id, number)
+    # Looked up by this client's own number, so nobody can finish someone else's job.
+    if job is not None and job.done_at is None:
+        whatsapp.done_reply(client, job_label(number))
+    return back_to(back, "done", number)
+
+
+@router.post("/invoices/{number}/paid")
+def invoice_paid(request: Request, number: int, back: str = Form("/money")):
+    """The Mark as paid button: the same as sending PAID INV-0244 on WhatsApp."""
+    client = logged_in_client(request)
+    if client is None:
+        return logged_out(request)
+    whatsapp.paid_reply(client, invoice_label(number))
+    return back_to(back, "paid", number)
+
+
+@router.post("/undo")
+def undo(request: Request, back: str = Form("/me")):
+    """Put back the last change, the same as sending UNDO on WhatsApp."""
+    client = logged_in_client(request)
+    if client is None:
+        return logged_out(request)
+    reply = whatsapp.undo_reply(client)
+    return back_to(back, "undone" if reply.text.startswith("Undone") else "nothing")
 
 
 @router.get("/download")

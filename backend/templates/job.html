@@ -8,10 +8,12 @@
     </span>
   </div>
   {% if job.address %}<div class="where">{{ job.address | replace('\n', ', ') }}</div>{% endif %}
-  {% if job.address or job.customer_phone %}
   <div class="actions">
     {% if job.customer_phone %}<a href="tel:{{ job.customer_phone }}">Call</a>{% endif %}
     {% if job.address %}<a href="https://www.google.com/maps/search/?api=1&query={{ job.address | replace('\n', ', ') | urlencode }}">Directions</a>{% endif %}
+    {% if not job.done_at %}
+    <form method="post" action="/jobs/{{ job.number }}/done"><input type="hidden" name="back" value="/me">
+      <button type="submit">Job done</button></form>
+    {% endif %}
   </div>
-  {% endif %}
 </div>
