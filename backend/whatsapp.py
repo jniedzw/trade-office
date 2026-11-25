@@ -11,6 +11,9 @@ import settings
 from ai import change_quote, read_booking, read_job, read_quote
 from alerts import alert_james
 from database import (
+    final_quote_for_job,
+    jobs_for_customer,
+    mark_job_done,
     get_job_by_number,
     get_quote_by_number,
     quotes_for_customer,
@@ -266,7 +269,7 @@ def is_new_command(command):
     to 1300"), so only messages that can't be an answer count as commands.
     """
     words = command.split()
-    if command in ("ALERTS ON", "ALERTS OFF", "PRICES", "HELP", "OWED", "PAID", "WEEK", "EXPORT", "PAGE"):
+    if command in ("ALERTS ON", "ALERTS OFF", "PRICES", "HELP", "OWED", "PAID", "WEEK", "EXPORT", "PAGE", "DONE"):
         return True
     if words[:1] in (["QUOTE"], ["LOG"], ["BOOK"]):
         return True
@@ -274,6 +277,8 @@ def is_new_command(command):
     # A name ("final price 1300") could be part of an answer, so only numbers count here.
     if words[:1] in (["FINAL"], ["INVOICE"], ["CHANGE"], ["PAID"]) and len(words) > 1:
         return read_number(words[1], ("INVOICE", "INV", "Q")) is not None
+    if words[:1] == ["DONE"] and len(words) > 1:
+        return read_number(words[1], ("JOB", "J"), need_prefix=True) is not None
     return False
 
 PRICE_HELP = (
@@ -382,6 +387,8 @@ def answer_question(client, question, answer):
         return book_from_answer(client, quote_id, answer)
     if asked == "new_booking":
         return book_reply(client, answer)
+    if asked == "job_done":
+        return done_reply(client, answer)
     return Reply("Sorry, I lost track of that. Please start again.")
 
 
@@ -537,6 +544,47 @@ def export_reply(client):
     return Reply("Here's all your data: jobs, quotes, invoices and prices.", link)
 
 
+def find_job(client, ref):
+    """Find a client's open job from what they typed: a number like J4, or a customer's name.
+
+    Return (job, None), (None, a Reply saying what's wrong), or (None, None) for nothing typed.
+    """
+    ref = ref.strip()
+    if ref == "":
+        return None, None
+    number = read_number(ref, ("JOB", "J"))
+    if number is not None:
+        job = get_job_by_number(client.id, number)
+        if job is None:
+            return None, Reply(f"There's no job {job_label(number)} for {client.business_name}.")
+        return job, None
+    jobs = jobs_for_customer(client.id, ref)
+    if not jobs:
+        return None, Reply(f"There's no open job for {ref}.")
+    if len(jobs) > 1:
+        choices = ", ".join(f"{job_label(job.number)} ({job.work})" for job in jobs[:5])
+        return None, Reply(f"{ref} has more than one open job: {choices}. Which one? Send its number.")
+    return jobs[0], None
+
+
+def done_reply(client, details):
+    """Mark a job as finished, and offer to invoice it if it has a final quote."""
+    job, problem = find_job(client, details)
+    if problem:
+        return problem
+    if job is None:
+        ask_question(client.id, "job_done", 0)
+        return Reply("Which job's done? Send its number, like J4, or the customer's name.")
+    mark_job_done(job.id)
+    text = f"Done: {job_label(job.number)}, {job.customer_name}, {job.work}. Nice one."
+    quote = final_quote_for_job(job.id)
+    if quote is not None and get_invoice_for_quote(quote.id) is None:
+        # The Make invoice button, since that's usually what comes next.
+        text += f" Tap Make invoice to bill {job.customer_name} for quote {quote_label(quote.number)}."
+        return Reply(text, None, buttons_for(settings.WHATSAPP_FINAL_BUTTONS, quote.number))
+    return Reply(text)
+
+
 def alerts_reply(client, details):
     """Turn WhatsApp alerts on or off."""
     if details.strip().upper() == "ON":
@@ -566,6 +614,7 @@ COMMANDS = {
     "WEEK": lambda client, rest: week_reply(client),
     "EXPORT": lambda client, rest: export_reply(client),
     "PAGE": lambda client, rest: page_reply(client),
+    "DONE": lambda client, rest: done_reply(client, rest),
 }
 
 

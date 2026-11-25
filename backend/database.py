@@ -167,7 +167,7 @@ class Job(SQLModel, table=True):
     customer_phone: str | None = None
     address: str | None = None
     work: str
-    # logged, then quoted, booked, invoiced and paid.
+    # logged, then quoted, booked, done, invoiced and paid.
     status: str = "logged"
     time: datetime = Field(default_factory=now_utc)
     # When it's booked for, saved in UTC, and the last day of a job that runs over days.
@@ -175,6 +175,8 @@ class Job(SQLModel, table=True):
     ends_on: date | None = None
     # Each client's jobs are numbered 1, 2, 3..., shown as J1, J2, J3.
     number: int | None = None
+    # When the tradesperson said the work was finished, or None.
+    done_at: datetime | None = None
 
 
 class PriceItem(SQLModel, table=True):
@@ -248,6 +250,7 @@ NEW_COLUMNS = [
     ("job", "number", "INTEGER"),
     ("quote", "number", "INTEGER"),
     ("businessdetails", "invoice_start", "INTEGER NOT NULL DEFAULT 1"),
+    ("job", "done_at", "DATETIME"),
 ]
 
 
@@ -776,6 +779,39 @@ def same_customer(saved_name, typed_name):
     """Return True if a typed name, like "mrs jones" or "jones", matches a saved one."""
     saved, typed = saved_name.strip().lower(), typed_name.strip().lower()
     return typed != "" and (saved == typed or typed in saved)
+
+
+# Jobs still to finish: done, invoiced and paid jobs are past this.
+OPEN_JOB = ("logged", "quoted", "booked")
+
+
+def jobs_for_customer(client_id, name, statuses=OPEN_JOB):
+    """Return this client's jobs for a customer with one of these statuses, newest first."""
+    with Session(engine) as session:
+        jobs = session.exec(select(Job).where(Job.client_id == client_id).order_by(Job.id.desc())).all()
+    return [job for job in jobs if job.status in statuses and same_customer(job.customer_name, name)]
+
+
+def mark_job_done(job_id):
+    """Mark a job as finished now. An invoiced or paid job keeps that status."""
+    with Session(engine) as session:
+        job = session.get(Job, job_id)
+        job.done_at = now_utc()
+        if job.status in OPEN_JOB:
+            job.status = "done"
+        session.add(job)
+        session.commit()
+
+
+def final_quote_for_job(job_id):
+    """Return the newest final quote for a job, or None."""
+    with Session(engine) as session:
+        statement = (
+            select(Quote)
+            .where(Quote.job_id == job_id, Quote.status == "final")
+            .order_by(Quote.id.desc())
+        )
+        return session.exec(statement).first()
 
 
 def get_job(job_id):

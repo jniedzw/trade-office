@@ -13,6 +13,7 @@ MENU_CHOICES = [
     ("Book a job", "BOOK", "Put a job in your diary"),
     ("What's on this week", "WEEK", "Your jobs for the next 7 days"),
     ("Who owes me", "OWED", "Unpaid invoices, oldest first"),
+    ("Job done", "DONE", "Mark a job as finished"),
     ("Mark as paid", "PAID", "Record a payment"),
     ("My prices", "PRICES", "See your saved prices"),
     ("My page", "PAGE", "Your jobs and money on the web"),
@@ -34,6 +35,7 @@ HELP_TEXT = (
     "INVOICE Q6, or INVOICE and the customer's name\n"
     "BOOK and the job and when, to book it in\n"
     "WEEK to see what's on\n"
+    "DONE J4, or DONE and the customer's name, when a job's finished\n"
     "OWED to see who owes you\n"
     "PAID INV-0244, or PAID and the customer's name\n"
     "PRICE boiler service 85 to save a price\n"

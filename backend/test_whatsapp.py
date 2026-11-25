@@ -996,3 +996,50 @@ def test_typed_labels_count_as_new_commands():
     assert whatsapp.is_new_command("PAID INV-0244") is True
     # A name could be part of an answer, like "final price 1300".
     assert whatsapp.is_new_command("FINAL PRICE 1300") is False
+
+
+def test_done_marks_a_job_finished_and_offers_an_invoice(monkeypatch, tmp_path):
+    use_final_quote(monkeypatch, tmp_path)
+    sent = use_buttons(monkeypatch)
+    log_test_job()
+    database.finish_quote(1, database.save_quote(1, "Mrs Jones", "Radiator", "RAD", 45000, job_id=1))
+
+    response = signed_whatsapp(OWNER, "DONE J1")
+
+    job = database.get_job(1)
+    assert job.status == "done" and job.done_at is not None
+    # The Make invoice button, for quote Q2 (Q1 came from use_final_quote).
+    assert sent == [("HX_FINAL", "2")]
+    assert "<Message>" not in response.text
+
+
+def test_done_by_customer_name(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    log_test_job()
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "done mrs jones")
+
+    assert text == "Done: J1, Mrs Jones, Leaking radiator. Nice one."
+
+
+def test_tapping_job_done_asks_which(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    log_test_job()
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "Job done")
+    assert text.startswith("Which job's done?")
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "J1")
+    assert text.startswith("Done: J1")
+
+
+def test_a_paid_job_stays_paid_when_marked_done(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    job_id = log_test_job()
+    quote_id = database.save_quote(1, "Mrs Jones", "Radiator", "RAD", 45000, job_id=job_id)
+    database.save_invoice(1, quote_id, "12 Test Road")
+    database.mark_paid(1, 1)
+
+    database.mark_job_done(job_id)
+
+    assert database.get_job(job_id).status == "paid"

@@ -84,7 +84,8 @@ def week_ahead(jobs, today):
         lines.append(day_name(day))
         for at, job in todays:
             where = f" ({job.address.splitlines()[0]})" if job.address else ""
-            lines.append(f"  {at + ' ' if at else ''}{job.customer_name}: {job.work}{where}")
+            done = " (done)" if job.done_at else ""
+            lines.append(f"  {at + ' ' if at else ''}{job.customer_name}: {job.work}{where}{done}")
     return "\n".join(lines) if lines else None
 
 

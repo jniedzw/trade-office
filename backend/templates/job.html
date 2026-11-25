@@ -2,6 +2,7 @@
 <div class="job">
   <span class="time">{{ at }}</span>
   <strong>{{ job.customer_name }}</strong>: {{ job.work }}
+  {% if job.done_at %}<span class="muted">· done</span>{% endif %}
   {% if job.address %}
     <br><a href="https://www.google.com/maps/search/?api=1&query={{ job.address | replace('\n', ', ') | urlencode }}">{{ job.address | replace('\n', ', ') }}</a>
   {% endif %}

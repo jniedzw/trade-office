@@ -45,3 +45,11 @@ def test_check_booking_rejects_dates_that_dont_make_sense():
     assert check_booking(date(2026, 11, 1), None, None, today) is None  # in the past
     assert check_booking(date(2026, 11, 9), None, date(2026, 11, 8), today) is None  # ends before it starts
     assert check_booking(date(2028, 1, 1), None, None, today) is None  # over a year away
+
+
+def test_week_ahead_marks_done_jobs():
+    job = Job(client_id=1, customer_name="Mr Smith", work="Boiler service",
+              starts_at=start_time(date(2026, 11, 9), time(9, 0)),
+              done_at=datetime(2026, 11, 9, 11, 0, tzinfo=timezone.utc))
+
+    assert week_ahead([job], date(2026, 11, 9)) == "Mon 9 Nov\n  9am Mr Smith: Boiler service (done)"
