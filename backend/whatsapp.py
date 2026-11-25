@@ -3,6 +3,7 @@
 main.py receives each message and hands it to whatsapp_reply here.
 """
 
+from datetime import timedelta
 from typing import NamedTuple
 
 import ai
@@ -11,6 +12,7 @@ import settings
 from ai import change_quote, read_booking, read_job, read_quote, uk_mobile
 from alerts import alert_james, try_send
 from database import (
+    mark_reminded,
     is_opted_out,
     mark_quote_sent,
     cancel_job,
@@ -55,6 +57,7 @@ from database import (
 from diary import uk_now, week_ahead, when
 from menu import HELP_TEXT, MENU_TEXT, command_for_title
 from quotes import (
+    CUSTOMER_LINK_DAYS,
     QUOTE_HELP,
     customer_quote_link,
     invoice_label,
@@ -279,13 +282,13 @@ def is_new_command(command):
     to 1300"), so only messages that can't be an answer count as commands.
     """
     words = command.split()
-    if command in ("ALERTS ON", "ALERTS OFF", "PRICES", "HELP", "OWED", "PAID", "WEEK", "EXPORT", "PAGE", "DONE", "UNDO"):
+    if command in ("ALERTS ON", "ALERTS OFF", "PRICES", "HELP", "OWED", "PAID", "WEEK", "EXPORT", "PAGE", "DONE", "UNDO", "REMIND"):
         return True
     if words[:1] in (["QUOTE"], ["LOG"], ["BOOK"]):
         return True
     # FINAL Q6, INVOICE Q6, CHANGE Q6 and PAID INV-0244 need a number straight after.
     # A name ("final price 1300") could be part of an answer, so only numbers count here.
-    if words[:1] in (["FINAL"], ["INVOICE"], ["CHANGE"], ["PAID"], ["SEND"]) and len(words) > 1:
+    if words[:1] in (["FINAL"], ["INVOICE"], ["CHANGE"], ["PAID"], ["SEND"], ["REMIND"]) and len(words) > 1:
         return read_number(words[1], ("INVOICE", "INV", "Q")) is not None
     if words[:1] in (["DONE"], ["MOVE"], ["CANCEL"]) and len(words) > 1:
         return read_number(words[1], ("JOB", "J"), need_prefix=True) is not None
@@ -446,23 +449,93 @@ def log_reply(client, details):
     return Reply("\n".join(lines), None, buttons_for(settings.WHATSAPP_JOB_BUTTONS, number))
 
 
+def days_overdue(client, invoice):
+    """Return how many days past its due date an unpaid invoice is (0 or less if it isn't due)."""
+    details = get_business_details(client.id)
+    days_to_pay = details.payment_days if details else 14
+    return (now_utc() - invoice["time"]).days - days_to_pay
+
+
 def owed_reply(client):
     """List who owes the client money, oldest first, with how overdue each is."""
     invoices = unpaid_invoices(client.id)
     if not invoices:
         return Reply("Nobody owes you anything. Nice one.")
-    details = get_business_details(client.id)
-    days_to_pay = details.payment_days if details else 14
     lines = []
     for invoice in invoices:
-        overdue = (now_utc() - invoice["time"]).days - days_to_pay
+        overdue = days_overdue(client, invoice)
         late = f", {overdue} days overdue" if overdue > 0 else ""
         lines.append(
             f"{invoice_label(invoice['number'])}: {invoice['customer_name']}, "
             f"{money(invoice['total_pence'])}{late}"
         )
     total = sum(invoice["total_pence"] for invoice in invoices)
-    return Reply("Who owes you:\n" + "\n".join(lines) + f"\nTotal: {money(total)}")
+    text = "Who owes you:\n" + "\n".join(lines) + f"\nTotal: {money(total)}"
+    if not any(days_overdue(client, invoice) > 0 for invoice in invoices):
+        return Reply(text)
+    # Something's overdue, so offer to chase it.
+    text += "\n\nTap Send reminders to text everyone overdue a polite reminder, or send REMIND INV-0244 for one."
+    buttons = (settings.WHATSAPP_OWED_BUTTONS, {}) if settings.WHATSAPP_OWED_BUTTONS else None
+    return Reply(text, None, buttons)
+
+
+# A customer isn't reminded about the same invoice more often than this.
+REMIND_EVERY_DAYS = 7
+
+
+def customer_mobile(quote):
+    """Return the customer's mobile for a quote, from the quote or its job, or None."""
+    job = get_job(quote.job_id) if quote.job_id else None
+    return quote.customer_phone or (job.customer_phone if job else None)
+
+
+def remind_reply(client, details):
+    """Text overdue customers a polite reminder: all of them, or one by number or name."""
+    ref = details.strip()
+    overdue = [invoice for invoice in unpaid_invoices(client.id) if days_overdue(client, invoice) > 0]
+    if ref:
+        number = read_number(ref, ("INVOICE", "INV"))
+        overdue = [
+            invoice for invoice in overdue
+            if invoice["number"] == number or (number is None and same_customer(invoice["customer_name"], ref))
+        ]
+    if not overdue:
+        return Reply("Nothing's overdue" + (f" for {ref}." if ref else ", so there's no one to remind."))
+
+    sent, skipped = [], []
+    for invoice in overdue:
+        label = f"{invoice['customer_name']} ({invoice_label(invoice['number'])})"
+        quote = get_quote(invoice["quote_id"])
+        phone = customer_mobile(quote)
+        if invoice["reminded_at"] and invoice["reminded_at"] > now_utc() - timedelta(days=REMIND_EVERY_DAYS):
+            skipped.append(f"{label}: reminded in the last week")
+        elif phone is None:
+            skipped.append(f"{label}: no mobile on record")
+        elif is_opted_out(client.id, phone):
+            skipped.append(f"{label}: replied STOP")
+        elif try_send(phone, reminder_text(client, invoice), client.twilio_number):
+            mark_reminded(invoice["id"])
+            sent.append(label)
+        else:
+            alert_james(client, "couldn't text a payment reminder.")
+            skipped.append(f"{label}: the text didn't go through")
+
+    lines = []
+    if sent:
+        lines.append("Reminders sent to " + ", ".join(sent) + ".")
+    if skipped:
+        lines.append("Not sent, so chase these yourself:\n" + "\n".join(skipped))
+    return Reply("\n".join(lines))
+
+
+def reminder_text(client, invoice):
+    """Return the polite reminder a customer gets about an overdue invoice."""
+    link = signed_link("invoice", invoice["id"], now_utc(), lasts=timedelta(days=CUSTOMER_LINK_DAYS))
+    return (
+        f"Hi {invoice['customer_name']}, a quick reminder from {client.business_name} that invoice "
+        f"{invoice_label(invoice['number'])} for {money(invoice['total_pence'])} is now due. "
+        f"You can see it here: {link}\nIf you've already paid, thank you, and please ignore this."
+    )
 
 
 def paid_reply(client, details):
@@ -596,8 +669,7 @@ def send_reply(client, details):
     label = quote_label(quote.number)
     if quote.status != "final":
         return Reply(f"Quote {label} is still a draft. Send FINAL {label} first, so you've checked it.")
-    job = get_job(quote.job_id) if quote.job_id else None
-    phone = quote.customer_phone or (job.customer_phone if job else None)
+    phone = customer_mobile(quote)
     if phone is None:
         ask_question(client.id, "customer_mobile", quote.id)
         return Reply(f"What's {quote.customer_name}'s mobile number? I'll text them the quote.")
@@ -753,6 +825,7 @@ COMMANDS = {
     "CANCEL": lambda client, rest: cancel_reply(client, rest),
     "UNDO": lambda client, rest: undo_reply(client),
     "SEND": lambda client, rest: send_reply(client, rest),
+    "REMIND": lambda client, rest: remind_reply(client, rest),
 }
 
 

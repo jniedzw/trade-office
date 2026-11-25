@@ -162,6 +162,8 @@ class Invoice(SQLModel, table=True):
     time: datetime = Field(default_factory=now_utc)
     # When it was paid, or None while it's still owed.
     paid_at: datetime | None = None
+    # When the customer was last texted a reminder, so they aren't chased too often.
+    reminded_at: datetime | None = None
 
 
 class Job(SQLModel, table=True):
@@ -274,6 +276,7 @@ NEW_COLUMNS = [
     ("quote", "customer_phone", "VARCHAR"),
     ("quote", "sent_at", "DATETIME"),
     ("quote", "accepted_at", "DATETIME"),
+    ("invoice", "reminded_at", "DATETIME"),
 ]
 
 
@@ -533,13 +536,25 @@ def unpaid_invoices(client_id):
         )
         return [
             {
+                "id": invoice.id,
                 "number": invoice.number,
+                "quote_id": quote.id,
                 "customer_name": quote.customer_name,
                 "total_pence": quote.total_pence,
                 "time": as_utc(invoice.time),
+                "reminded_at": as_utc(invoice.reminded_at) if invoice.reminded_at else None,
             }
             for invoice, quote in session.exec(statement).all()
         ]
+
+
+def mark_reminded(invoice_id):
+    """Record that the customer was just sent a reminder about this invoice."""
+    with Session(engine) as session:
+        invoice = session.get(Invoice, invoice_id)
+        invoice.reminded_at = now_utc()
+        session.add(invoice)
+        session.commit()
 
 
 def mark_paid(client_id, number):

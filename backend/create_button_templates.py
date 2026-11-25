@@ -28,6 +28,10 @@ TEMPLATES = {
         {"title": "Send to customer", "id": "SEND {{2}}"},
         {"title": "Make invoice", "id": "INVOICE {{2}}"},
     ],
+    # Under Who owes me, when something's overdue. No number: it reminds everyone overdue.
+    "WHATSAPP_OWED_BUTTONS": [
+        {"title": "Send reminders", "id": "REMIND"},
+    ],
     # Under a logged job, where {{2}} is the job number.
     "WHATSAPP_JOB_BUTTONS": [
         {"title": "Quote it", "id": "QUOTE JOB {{2}}"},
@@ -92,11 +96,14 @@ def submit_for_approval(sid, auth):
 
 def template(name, buttons):
     """Return what the Content API needs to create one quick reply template."""
+    # Example values, which Twilio asks for with every variable it uses.
+    variables = {"1": "Draft quote 1 saved."}
+    if any("{{2}}" in button["id"] for button in buttons):
+        variables["2"] = "1"
     return {
         "friendly_name": name.lower(),
         "language": "en",
-        # Example values, which Twilio asks for with every variable.
-        "variables": {"1": "Draft quote 1 saved.", "2": "1"},
+        "variables": variables,
         "types": {"twilio/quick-reply": {"body": "{{1}}", "actions": buttons}},
     }
 

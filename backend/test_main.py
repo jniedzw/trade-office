@@ -54,6 +54,7 @@ def use_fakes(monkeypatch, tmp_path, active=True, failing=()):
     monkeypatch.setattr(settings, "WHATSAPP_FINAL_BUTTONS", None)
     monkeypatch.setattr(settings, "WHATSAPP_MENU", None)
     monkeypatch.setattr(settings, "WHATSAPP_JOB_BUTTONS", None)
+    monkeypatch.setattr(settings, "WHATSAPP_OWED_BUTTONS", None)
     # The cleanup job must never reach the real Twilio account from a test.
     monkeypatch.setattr(main, "count_old_twilio_records", lambda cutoff: (0, 0))
 

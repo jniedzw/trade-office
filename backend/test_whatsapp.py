@@ -708,11 +708,11 @@ def test_who_owes_me_lists_unpaid_invoices_oldest_first(monkeypatch, tmp_path):
 
     text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "Who owes me")
 
-    assert text == (
+    assert text.startswith(
         "Who owes you:\n"
         "INV-0002: Mrs Jones, £1,250.50, 6 days overdue\n"
         "INV-0001: Mr Smith, £85.00\n"
-        "Total: £1,335.50"
+        "Total: £1,335.50\n\nTap Send reminders"
     )
 
 
@@ -1224,3 +1224,65 @@ def test_no_text_to_a_customer_who_said_stop(monkeypatch, tmp_path):
 
     assert "replied STOP" in text
     assert texts == []
+
+
+def overdue_invoice(name="Mrs Jones", phone="+447700900123", days_ago=20):
+    """Save a final job quote and an invoice dated days_ago days back. Return the invoice number."""
+    job_id = database.save_job(1, name, "Radiator", customer_phone=phone)
+    quote_id = database.save_quote(1, name, "Radiator", "RAD", 45000, job_id=job_id)
+    database.finish_quote(1, quote_id)
+    return make_invoice(quote_id, days_ago=days_ago)
+
+
+def test_remind_texts_overdue_customers(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+    texts = use_sms_log(monkeypatch)
+    overdue_invoice()
+    overdue_invoice("Mr Smith", "+447700900456", days_ago=3)  # not due yet
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "REMIND")
+
+    assert text == "Reminders sent to Mrs Jones (INV-0001)."
+    [(to, body)] = texts
+    assert to == "+447700900123"
+    assert "invoice INV-0001 for £450.00 is now due" in body
+    assert f"{settings.PUBLIC_URL}/invoices/" in body
+
+
+def test_a_customer_isnt_reminded_twice_in_a_week(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+    texts = use_sms_log(monkeypatch)
+    overdue_invoice()
+    whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "REMIND")
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "REMIND mrs jones")
+
+    assert "Mrs Jones (INV-0001): reminded in the last week" in text
+    assert len(texts) == 1
+
+
+def test_reminders_skip_no_mobile_and_stop(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+    texts = use_sms_log(monkeypatch)
+    overdue_invoice("Mrs Jones", phone=None)
+    overdue_invoice("Mr Smith", "+447700900456")
+    database.opt_out(1, "+447700900456")
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "REMIND")
+
+    assert "Mrs Jones (INV-0001): no mobile on record" in text
+    assert "Mr Smith (INV-0002): replied STOP" in text
+    assert texts == []
+
+
+def test_who_owes_me_offers_reminders_only_when_something_is_overdue(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+    monkeypatch.setattr(settings, "WHATSAPP_OWED_BUTTONS", "HX_OWED")
+    overdue_invoice(days_ago=3)
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "OWED")
+    assert buttons is None
+
+    overdue_invoice("Mr Smith", "+447700900456", days_ago=20)
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "OWED")
+    assert buttons == ("HX_OWED", {})
