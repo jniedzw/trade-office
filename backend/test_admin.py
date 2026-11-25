@@ -126,3 +126,14 @@ def test_admin_delete_needs_the_exact_name(monkeypatch, tmp_path):
 
     client.post("/admin/clients/1/delete", headers=cookie, data={"confirm": "Test Plumbing"})
     assert database.get_client(1) is None
+
+
+def test_admin_saves_the_owners_first_name(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    client.post("/admin/clients/1", headers=admin_cookie(), data={
+        "business_name": "Test Plumbing", "owner_mobile": OWNER, "text_back_message": "Hi",
+        "active": "yes", "owner_name": " Dave ",
+    })
+
+    assert database.get_client(1).owner_name == "Dave"

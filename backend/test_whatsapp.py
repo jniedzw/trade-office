@@ -541,7 +541,8 @@ def test_hi_gets_the_menu(monkeypatch, tmp_path):
 
     response = signed_whatsapp(OWNER, "Morning")
 
-    assert sent == [("HX_MENU", None)]
+    # The briefing goes first as its own message, then the buttons.
+    assert sent == [("pdf", False), ("HX_MENU", None)]
     assert "<Message>" not in response.text
 
 
@@ -550,7 +551,7 @@ def test_without_the_menu_template_hi_gets_help(monkeypatch, tmp_path):
 
     text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "hello")
 
-    assert text == whatsapp.HELP_TEXT
+    assert text.endswith(whatsapp.HELP_TEXT)
 
 
 def test_new_quote_from_the_menu_asks_about_the_job(monkeypatch, tmp_path):
@@ -1369,7 +1370,7 @@ def test_a_voice_note_without_a_command_says_how_to_start(monkeypatch, tmp_path)
 
     text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "", VOICE)
 
-    assert text.startswith('I heard: "Mrs Jones rang about her boiler"\n\nStart with what you')
+    assert text.startswith('I heard: "Mrs Jones rang about her boiler"\n\nSorry, I didn\'t catch what you need')
 
 
 def test_a_voice_note_that_cant_be_heard(monkeypatch, tmp_path):
@@ -1397,3 +1398,82 @@ def test_a_group_title_typed_or_tapped_works_too(monkeypatch, tmp_path):
 
     # No template set up, so the plain-text version of the Money menu.
     assert text == "Money:\nOWED: Unpaid invoices, oldest first\nPAID: Record a payment"
+
+
+def test_the_briefing_shows_today_and_whats_owed(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    database.set_owner_name(1, "Dave")
+    job_id = log_test_job()
+    now = diary.uk_now(database.now_utc())
+    database.book_job(job_id, datetime(now.year, now.month, now.day, 23, 0, tzinfo=diary.UK))
+    database.save_invoice(1, add_quote(1, "Mr Smith"), "12 Test Road")
+
+    text = whatsapp.briefing(database.get_client(1))
+
+    assert text.splitlines()[0] in ("Morning Dave.", "Afternoon Dave.", "Evening Dave.")
+    assert "11pm Mrs Jones: Leaking radiator (12 Test Road)" in text
+    assert "£85.00 owed to you." in text
+
+
+def route_as(monkeypatch, command, details):
+    """Make the AI read every plain message as this command."""
+    monkeypatch.setattr(whatsapp, "route_message", lambda message: (command, details))
+
+
+def test_a_plain_message_runs_the_command_it_means(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    database.save_invoice(1, add_quote(1, "Mrs Jones"), "12 Test Road")
+    route_as(monkeypatch, "PAID", "Mrs Jones")
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "mrs jones has paid")
+
+    assert text == "INV-0001 marked as paid. (I read that as PAID Mrs Jones. Send UNDO if I got it wrong.)"
+
+
+def test_texting_customers_from_a_plain_message_checks_first(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+    texts = use_sms_log(monkeypatch)
+    final_job_quote()
+    route_as(monkeypatch, "SEND", "Q2")
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "can you text mrs jones her quote")
+    assert text == "Just to check, you'd like me to do: SEND Q2? Reply YES and I'll do it."
+    assert texts == []
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "yes")
+    assert text.startswith("Sent quote Q2 to Mrs Jones")
+
+
+def test_saying_no_to_the_check(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+    texts = use_sms_log(monkeypatch)
+    final_job_quote()
+    route_as(monkeypatch, "SEND", "Q2")
+    whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "can you text mrs jones her quote")
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "no wait")
+
+    assert text == "OK, I won't."
+    assert texts == []
+
+
+def test_greetings_dont_use_the_ai(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    def must_not_run(message):
+        raise AssertionError("asked the AI about a greeting")
+
+    monkeypatch.setattr(whatsapp, "route_message", must_not_run)
+
+    for greeting in ["morning", "Good morning Jack!", "hiya", "cheers"]:
+        whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", greeting)
+
+
+def test_a_command_followed_by_a_name_and_more_words(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+    use_sms_log(monkeypatch)
+    final_job_quote()
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "send mrs jones her quote")
+
+    assert text.startswith("Sent quote Q2 to Mrs Jones")

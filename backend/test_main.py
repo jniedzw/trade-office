@@ -49,6 +49,7 @@ def use_fakes(monkeypatch, tmp_path, active=True, failing=()):
     monkeypatch.setattr(whatsapp, "read_quote", lambda details, **kwargs: None)
     monkeypatch.setattr(whatsapp, "read_job", lambda details: None)
     monkeypatch.setattr(whatsapp, "read_booking", lambda message, now_uk: None)
+    monkeypatch.setattr(whatsapp, "route_message", lambda message: None)
     monkeypatch.setattr(whatsapp, "change_quote", lambda quote, lines, change: None)
     monkeypatch.setattr(settings, "WHATSAPP_DRAFT_BUTTONS", None)
     monkeypatch.setattr(settings, "WHATSAPP_FINAL_BUTTONS", None)

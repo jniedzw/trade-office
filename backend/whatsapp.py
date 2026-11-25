@@ -9,7 +9,7 @@ from typing import NamedTuple
 import ai
 import export
 import settings
-from ai import change_quote, read_booking, read_job, read_quote, uk_mobile
+from ai import change_quote, read_booking, read_job, read_quote, route_message, uk_mobile
 from alerts import alert_james, try_send
 from database import (
     create_admin_link,
@@ -56,8 +56,8 @@ from database import (
     unpaid_invoices,
     update_quote,
 )
-from diary import uk_now, week_ahead, when
-from menu import HELP_TEXT, MENU_GROUPS, MENU_TEXT, command_for_title, group_text
+from diary import day_name, uk_now, week_ahead, week_days, when
+from menu import HELP_TEXT, MENU_GROUPS, command_for_title, group_text
 from quotes import (
     CUSTOMER_LINK_DAYS,
     QUOTE_HELP,
@@ -95,11 +95,44 @@ def buttons_for(template, number):
     return (template, {"2": str(number)}) if template else None
 
 
+def briefing(client):
+    """Return the owner's day at a glance: a greeting, today's jobs, and what's owed."""
+    now = uk_now(now_utc())
+    hello = "Morning" if now.hour < 12 else "Afternoon" if now.hour < 17 else "Evening"
+    lines = [f"{hello} {client.owner_name}.".replace(" .", ".")]
+
+    week = week_days(booked_jobs(client.id, now_utc()), now.date())
+    todays = week[0][1] if week and week[0][0] == now.date() else []
+    if todays:
+        lines.append("Today:")
+        for at, job in todays[:4]:
+            where = f" ({job.address.splitlines()[0]})" if job.address else ""
+            lines.append(f"{at + ' ' if at else ''}{job.customer_name}: {job.work}{where}")
+        if len(todays) > 4:
+            lines.append(f"...and {len(todays) - 4} more. Send WEEK for all of them.")
+    elif week:
+        day, jobs = week[0]
+        at, job = jobs[0]
+        lines.append(f"Nothing booked today. Next: {day_name(day)}{', ' + at if at else ''}, {job.customer_name}.")
+    else:
+        lines.append("Nothing booked this week.")
+
+    invoices = unpaid_invoices(client.id)
+    if invoices:
+        late = sum(1 for invoice in invoices if days_overdue(client, invoice) > 0)
+        total = money(sum(invoice["total_pence"] for invoice in invoices))
+        lines.append(f"{total} owed to you" + (f", {late} overdue." if late else "."))
+    return "\n".join(lines)
+
+
 def menu_reply(client):
-    """Return the main menu (Jobs, Money, More), or plain help if its template isn't set up."""
+    """Return the owner's briefing and the main menu (Jobs, Money, More).
+
+    Without the menu template, the briefing and plain help instead.
+    """
     if not settings.WHATSAPP_MENU:
-        return Reply(HELP_TEXT)
-    return Reply(MENU_TEXT, None, (settings.WHATSAPP_MENU, {}))
+        return Reply(briefing(client) + "\n\n" + HELP_TEXT)
+    return Reply(briefing(client), None, (settings.WHATSAPP_MENU, {}))
 
 
 # Each group's template, by the group's name in menu.py.
@@ -432,6 +465,12 @@ def answer_question(client, question, answer):
         return done_reply(client, answer)
     if asked == "customer_mobile":
         return mobile_answer(client, quote_id, answer)
+    if asked.startswith("confirm:"):
+        meant = asked.removeprefix("confirm:")
+        if answer.strip().upper().strip(".!") not in YES:
+            return Reply("OK, I won't.")
+        command = meant.split()[0]
+        return COMMANDS[command](client, meant[len(command):])
     return Reply("Sorry, I lost track of that. Please start again.")
 
 
@@ -882,11 +921,7 @@ def voice_reply(sender, link, kind):
     if heard is None:
         return Reply(VOICE_NOT_YET)
     reply = whatsapp_reply(sender, from_the_command(heard, COMMANDS))
-    note = f'I heard: "{heard}"'
-    if reply.text in (HELP_TEXT, MENU_TEXT):
-        # Nothing to do from it, so say how to start rather than showing the menu.
-        return Reply(f"{note}\n\nStart with what you'd like, like QUOTE, LOG or BOOK, and I'll do it.")
-    return reply._replace(text=f"{note}\n\n{reply.text}")
+    return reply._replace(text=f'I heard: "{heard}"\n\n{reply.text}')
 
 
 def whatsapp_reply(sender, body="", media=()):
@@ -928,7 +963,42 @@ def whatsapp_reply(sender, body="", media=()):
     first_word = command.split()[0] if command else ""
     if first_word in COMMANDS:
         return COMMANDS[first_word](client, body[len(first_word):])
-    return menu_reply(client)
+    # "Morning", "hi" and the like get the briefing, without asking the AI.
+    if all(word.strip(".,!?") in GREETINGS for word in command.split()):
+        return menu_reply(client)
+    return plain_message_reply(client, body)
+
+
+# Words that just mean "hello", so the message gets the briefing and menu.
+GREETINGS = {"HI", "HELLO", "HEY", "HIYA", "MORNING", "GOOD", "AFTERNOON", "EVENING", "JACK",
+             "MENU", "OPTIONS", "START", "ALRIGHT", "YO", "OK", "OKAY", "THANKS", "CHEERS", "TA"}
+
+# Commands that text customers, so Jack checks before doing them from a plain message.
+CHECK_FIRST = {"SEND", "REMIND"}
+# Commands that change something UNDO can put back.
+UNDOABLE_COMMANDS = {"PAID", "DONE", "CANCEL", "MOVE", "FINAL", "CHANGE"}
+YES = {"YES", "Y", "YEP", "YEAH", "YUP", "OK", "OKAY", "GO", "SURE", "DO IT"}
+
+
+def plain_message_reply(client, body):
+    """Work out which command a plain message means, and do it (or check first)."""
+    routed = route_message(body)
+    if routed is None:
+        return Reply(
+            "Sorry, I didn't catch what you need. Tap a button, or start with QUOTE, LOG, BOOK or PAID.",
+            None,
+            (settings.WHATSAPP_MENU, {}) if settings.WHATSAPP_MENU else None,
+        )
+    command, details = routed
+    meant = f"{command} {details}".strip()
+    if command in CHECK_FIRST:
+        # The question remembers the command itself, since there's no quote ID to keep.
+        ask_question(client.id, f"confirm:{meant}", 0)
+        return Reply(f"Just to check, you'd like me to do: {meant}? Reply YES and I'll do it.")
+    reply = COMMANDS[command](client, details)
+    if command in UNDOABLE_COMMANDS:
+        return reply._replace(text=f"{reply.text} (I read that as {meant}. Send UNDO if I got it wrong.)")
+    return reply
 
 
 def send_with_buttons(to, reply):
@@ -939,14 +1009,22 @@ def send_with_buttons(to, reply):
     # Buttons can't go in a TwiML reply, so both are sent through Twilio's API,
     # the PDF first so the buttons arrive underneath it.
     template, gaps = reply.buttons
-    pdf_sent = False
+    pdf_sent = words_sent = False
+    text = reply.text
     try:
         if reply.link:
             send_whatsapp(to, media_url=reply.link)
             pdf_sent = True
-        send_whatsapp_buttons(to, template, {"1": reply.text, **gaps})
+        if "\n" in text:
+            # WhatsApp won't put new lines in a button message's gap, so longer replies
+            # go first as their own message, with a short prompt above the buttons.
+            send_whatsapp(to, body=text)
+            words_sent, text = True, "What would you like to do?"
+        send_whatsapp_buttons(to, template, {"1": text, **gaps})
         return None
     except Exception as error:
-        # A plain reply is better than none, but don't send the PDF twice.
+        # A plain reply is better than none, but nothing should arrive twice.
         print(f"Buttons failed: {type(error).__name__}", flush=True)
+        if words_sent:
+            return None
         return reply._replace(link=None) if pdf_sent else reply

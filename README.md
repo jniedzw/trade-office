@@ -73,6 +73,7 @@ backend/
   ai.py            # read rough messages (quotes, jobs, bookings) with Claude
   eval_quotes.py   # check the AI against 27 made-up quote messages (costs about 25p)
   eval_bookings.py # check the AI's reading of dates and times (costs about 1p)
+  eval_router.py   # check the AI turns plain messages into the right command (a few pence)
   ai_costs.py      # what the AI cost in the last 30 days, per client
   settings.py      # app-wide settings read from .env
   add_client.py    # add a real client by answering questions

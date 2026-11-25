@@ -24,6 +24,7 @@ from database import (
     now_utc,
     remove_skip_number,
     save_business_details,
+    set_owner_name,
     skip_numbers,
     start_admin_session,
     update_client,
@@ -135,6 +136,7 @@ def save_client(
     owner_mobile: str = Form(""),
     text_back_message: str = Form(""),
     active: str = Form(""),
+    owner_name: str = Form(""),
 ):
     if (blocked := admin_only(request)) is not None:
         return blocked
@@ -142,6 +144,7 @@ def save_client(
     if not business_name.strip() or mobile is None or not text_back_message.strip():
         return client_page(request, client_id, error="Please give a business name, a UK mobile and a message.")
     update_client(client_id, business_name.strip(), mobile, text_back_message.strip(), active == "yes")
+    set_owner_name(client_id, owner_name)
     return back_to(f"/admin/clients/{client_id}?saved=yes")
 
 

@@ -84,6 +84,39 @@ Answer with:
 If they don't say a day at all, use null for date."""
 
 
+ROUTER_INSTRUCTIONS = """A UK tradesperson has messaged their admin assistant, Jack, on WhatsApp.
+Work out which one command they mean, and rewrite the message as that command.
+Commands, with examples:
+- LOG: save a new job or enquiry. "LOG Mrs Jones, 12 Elm Rd, leaking radiator"
+- QUOTE: make a quote. "QUOTE Mr Smith boiler service 85"
+- BOOK: book a job in. "BOOK Mrs Jones Tuesday 9am" or "BOOK J4 Tuesday 9am"
+- MOVE: move a booked job. "MOVE J4 Thursday 2pm" or "MOVE Mrs Jones to Thursday 2pm"
+- CANCEL: cancel a job. "CANCEL J4" or "CANCEL Mrs Jones"
+- DONE: a job is finished. "DONE J4" or "DONE Mrs Jones"
+- WEEK: what's booked this week. "WEEK"
+- OWED: who owes them money. "OWED"
+- PAID: an invoice has been paid. "PAID INV-0244" or "PAID Mrs Jones"
+- REMIND: text overdue customers a reminder. "REMIND" or "REMIND Mrs Jones"
+- SEND: text a final quote to the customer. "SEND Q12" or "SEND Mrs Jones"
+- FINAL: finish a draft quote. "FINAL Q12" or "FINAL Mrs Jones"
+- INVOICE: invoice a final quote. "INVOICE Q12" or "INVOICE Mrs Jones"
+- CHANGE: change a quote. "CHANGE Q12 price is 1300"
+- PRICE: save a standard price. "PRICE boiler service 85"
+- PRICES: see saved prices. MARKUP: set materials markup. "MARKUP 15"
+- UNDO: undo the last thing Jack did. PAGE: link to their web page. EXPORT: all their data.
+Rules:
+- command: the command word, or "NONE" if the message doesn't clearly ask for one of these.
+- details: the rest of the command, using only their words, names and numbers. Never add a
+  number, price, date or name they didn't write. Leave out greetings and filler."""
+
+
+class RouteDraft(BaseModel):
+    """The shape Claude must answer in when working out which command was meant."""
+
+    command: str
+    details: str
+
+
 class BookingDraft(BaseModel):
     """The shape Claude must answer in when reading a booking."""
 
@@ -318,3 +351,33 @@ def read_booking(message, now_uk):
     return diary.check_booking(
         day, diary.parse_iso_time(draft.time), diary.parse_iso_date(draft.end_date), now_uk.date()
     )
+
+
+# Commands a plain message can be turned into. Not ALERTS or MENU, which need exact words.
+ROUTABLE = {
+    "LOG", "QUOTE", "BOOK", "MOVE", "CANCEL", "DONE", "WEEK", "OWED", "PAID", "REMIND", "SEND",
+    "FINAL", "INVOICE", "CHANGE", "PRICE", "PRICES", "MARKUP", "UNDO", "PAGE", "EXPORT",
+}
+
+
+def numbers_in(text):
+    """Return every run of digits in some text, like {"12", "0244"}."""
+    return set(re.findall(r"\d+", text.replace(",", "")))
+
+
+def route_message(message):
+    """Return (command, details) for what a plain message means, or None if it's unclear.
+
+    The command then runs with all its usual checks, so this only decides which one.
+    """
+    draft = safely_ask_claude(message, ROUTER_INSTRUCTIONS, RouteDraft)
+    if draft is None:
+        return None
+    command = draft.command.strip().upper()
+    details = draft.details.strip()
+    if command not in ROUTABLE:
+        return None
+    # Every number must be one they wrote, so a misreading can't invent a price or a quote.
+    if not numbers_in(details) <= numbers_in(message):
+        return None
+    return command, details

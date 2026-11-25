@@ -39,6 +39,8 @@ class Client(SQLModel, table=True):
     active: bool = True
     # Added to materials on quotes, as a percentage.
     markup_percent: int = 0
+    # The owner's first name, so Jack can say "Morning Andy". Empty if not given.
+    owner_name: str = ""
 
 
 def now_utc():
@@ -299,6 +301,7 @@ NEW_COLUMNS = [
     ("quote", "review_ok", "BOOLEAN NOT NULL DEFAULT 0"),
     ("job", "review_asked_at", "DATETIME"),
     ("businessdetails", "review_link", "VARCHAR NOT NULL DEFAULT ''"),
+    ("client", "owner_name", "VARCHAR NOT NULL DEFAULT ''"),
 ]
 
 
@@ -838,9 +841,13 @@ def quotes_for_customer(client_id, name):
 
 
 def same_customer(saved_name, typed_name):
-    """Return True if a typed name, like "mrs jones" or "jones", matches a saved one."""
+    """Return True if a typed name matches a saved one.
+
+    "jones" matches "Mrs Jones", and so does "mrs jones her quote", where the name
+    is followed by other words.
+    """
     saved, typed = saved_name.strip().lower(), typed_name.strip().lower()
-    return typed != "" and (saved == typed or typed in saved)
+    return typed != "" and saved != "" and (typed in saved or f"{saved} " in f"{typed} ")
 
 
 # Jobs still to finish: done, invoiced, paid and cancelled jobs are past this.
@@ -1226,6 +1233,15 @@ def is_admin(cookie):
         )
         login = session.exec(statement).first()
         return login is not None and as_utc(login.expires_at) > now_utc()
+
+
+def set_owner_name(client_id, name):
+    """Save the owner's first name, for Jack's greetings."""
+    with Session(engine) as session:
+        client = session.get(Client, client_id)
+        client.owner_name = name.strip()
+        session.add(client)
+        session.commit()
 
 
 def update_client(client_id, business_name, owner_mobile, text_back_message, active):

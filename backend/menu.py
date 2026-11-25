@@ -36,10 +36,6 @@ NOT_IN_MENU = [
     "MOVE", "CANCEL", "UNDO", "SEND", "REMIND", "MENU",
 ]
 
-# What Jack says to anything he doesn't recognise, like "morning".
-MENU_TEXT = "Hi, it's Jack. What do you need?"
-
-
 def group_text(group):
     """Return a group's menu as plain text, for when its template isn't set up."""
     title, choices = MENU_GROUPS[group]

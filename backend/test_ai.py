@@ -12,6 +12,7 @@ from ai import (
     JobDraft,
     PricedItem,
     QuoteDraft,
+    RouteDraft,
     change_quote,
     prices_in,
     read_booking,
@@ -293,3 +294,21 @@ def test_photos_go_before_the_words():
     assert content[1] == {"type": "text", "text": "QUOTE mrs jones"}
     ai.current_photos.set(())
     assert ai.with_photos("hi") == "hi"
+
+
+def test_route_message(monkeypatch):
+    use_fake_claude(monkeypatch, RouteDraft(command="paid", details="Mrs Jones"))
+
+    assert ai.route_message("mrs jones paid me today") == ("PAID", "Mrs Jones")
+
+
+def test_route_message_refuses_a_made_up_number(monkeypatch):
+    use_fake_claude(monkeypatch, RouteDraft(command="QUOTE", details="Mr Smith boiler service 95"))
+
+    assert ai.route_message("quote mr smith a boiler service") is None
+
+
+def test_route_message_refuses_unknown_commands(monkeypatch):
+    for command in ["NONE", "ALERTS", "DELETE"]:
+        use_fake_claude(monkeypatch, RouteDraft(command=command, details=""))
+        assert ai.route_message("something") is None
