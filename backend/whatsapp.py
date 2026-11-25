@@ -23,6 +23,7 @@ from database import (
     snapshot,
     undo_last_change,
     final_quote_for_job,
+    link_quote_to_job,
     jobs_for_customer,
     mark_job_done,
     get_job_by_number,
@@ -849,12 +850,38 @@ def done_reply(client, details):
     details = get_business_details(client.id)
     if details and details.review_link and any(q.review_ok for q in quotes_for_job(job.id)):
         text += f" {job.customer_name} said yes to a review request, so I'll text them tomorrow."
-    quote = final_quote_for_job(job.id)
-    if quote is not None and get_invoice_for_quote(quote.id) is None:
+    quote = quote_to_invoice(client, job)
+    if quote is not None and quote.status == "final":
         # The Make invoice button, since that's usually what comes next.
         text += f" Tap Make invoice to bill {job.customer_name} for quote {quote_label(quote.number)}."
         return Reply(text, None, buttons_for(settings.WHATSAPP_FINAL_BUTTONS, quote.number))
+    if quote is not None:
+        label = quote_label(quote.number)
+        text += f" Quote {label} is still a draft. Send FINAL {label}, then you can invoice it."
     return Reply(text)
+
+
+def quote_to_invoice(client, job):
+    """Return the quote to invoice for a job, or None if there's nothing to invoice.
+
+    Usually that's the job's own final quote. A quote made with QUOTE rather than
+    from the job isn't linked to it, so then it's the customer's newest quote that
+    has no job and no invoice yet, which gets linked to this job. It may be a draft.
+    """
+    quote = final_quote_for_job(job.id)
+    if quote is not None:
+        return quote if get_invoice_for_quote(quote.id) is None else None
+    loose = [
+        quote for quote in quotes_for_customer(client.id, job.customer_name)
+        if quote.job_id is None and get_invoice_for_quote(quote.id) is None
+    ]
+    if not loose:
+        return None
+    # Newest first, but a final quote beats a newer draft: that's the one they agreed.
+    quote = next((quote for quote in loose if quote.status == "final"), loose[0])
+    if quote.status == "final":
+        link_quote_to_job(quote.id, job.id)
+    return quote
 
 
 def alerts_reply(client, details):

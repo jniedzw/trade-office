@@ -1019,6 +1019,45 @@ def test_done_marks_a_job_finished_and_offers_an_invoice(monkeypatch, tmp_path):
     assert "<Message>" not in response.text
 
 
+def test_done_offers_an_invoice_for_a_quote_made_without_the_job(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    monkeypatch.setattr(settings, "WHATSAPP_FINAL_BUTTONS", "HX_FINAL")
+    sent = use_buttons(monkeypatch)
+    log_test_job()
+    # Made with QUOTE, so it isn't linked to J1.
+    quote_id = database.save_quote(1, "mrs jones", "Radiator", "RAD", 45000)
+    database.finish_quote(1, quote_id)
+
+    signed_whatsapp(OWNER, "DONE J1")
+
+    assert sent == [("HX_FINAL", "1")]
+    assert database.get_quote(quote_id).job_id == 1
+
+
+def test_done_says_if_the_quote_is_still_a_draft(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    log_test_job()
+    database.save_quote(1, "Mrs Jones", "Radiator", "RAD", 45000)
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "DONE J1")
+
+    assert text.endswith("Quote Q1 is still a draft. Send FINAL Q1, then you can invoice it.")
+    assert database.get_quote(1).job_id is None
+
+
+def test_done_doesnt_offer_a_quote_thats_already_invoiced(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    log_test_job()
+    quote_id = database.save_quote(1, "Mrs Jones", "Radiator", "RAD", 45000)
+    database.finish_quote(1, quote_id)
+    database.save_business_details(1, legal_name="Test", address="1 Test Street", ref_letters="TP", bank_details="Bank")
+    database.save_invoice(1, quote_id, "12 Test Road")
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "DONE J1")
+
+    assert text == "Done: J1, Mrs Jones, Leaking radiator. Nice one."
+
+
 def test_done_by_customer_name(monkeypatch, tmp_path):
     use_fakes(monkeypatch, tmp_path)
     log_test_job()

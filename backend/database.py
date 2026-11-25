@@ -1129,6 +1129,15 @@ def quotes_waiting(client_id):
         return session.exec(statement).all()
 
 
+def link_quote_to_job(quote_id, job_id):
+    """Say this quote is for this job, so paying its invoice marks the job paid too."""
+    with Session(engine) as session:
+        quote = session.get(Quote, quote_id)
+        quote.job_id = job_id
+        session.add(quote)
+        session.commit()
+
+
 def final_quote_for_job(job_id):
     """Return the newest final quote for a job, or None."""
     with Session(engine) as session:
