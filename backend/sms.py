@@ -1,4 +1,5 @@
 import json
+import time
 
 import requests
 
@@ -46,6 +47,23 @@ def send_whatsapp(to: str, body: str = "", media_url: str | None = None) -> str:
         media_url=[media_url] if media_url else None,
     )
     return message.sid
+
+
+# Twilio statuses that mean WhatsApp has the message, or never will.
+SETTLED = {"sent", "delivered", "read", "failed", "undelivered"}
+
+
+def wait_until_sent(message_sid: str, seconds: float = 5) -> None:
+    """Wait until WhatsApp has a message, or give up after a few seconds.
+
+    Twilio doesn't promise to deliver separate messages in the order they were sent,
+    so the next message waits until this one has gone.
+    """
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if client.messages(message_sid).fetch().status in SETTLED:
+            return
+        time.sleep(0.3)
 
 
 def send_whatsapp_buttons(to: str, template: str, variables: dict) -> str:

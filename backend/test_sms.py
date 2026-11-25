@@ -48,3 +48,21 @@ def test_send_whatsapp_alert_uses_the_template(monkeypatch):
     assert sent["content_sid"] == "HX_FAKE"
     assert json.loads(sent["content_variables"]) == {"1": "+447700900003", "2": "ok"}
     assert sent["status_callback"].endswith("/whatsapp-status")
+
+
+def test_wait_until_sent_stops_once_whatsapp_has_it(monkeypatch):
+    statuses = iter(["queued", "queued", "sent"])
+    checks = []
+
+    class FakeMessage:
+        def fetch(self):
+            checks.append(1)
+            return type("Message", (), {"status": next(statuses)})()
+
+    # The real client's messages can't be replaced, so swap in a stand-in client.
+    monkeypatch.setattr(sms, "client", SimpleNamespace(messages=lambda sid: FakeMessage()))
+    monkeypatch.setattr(sms.time, "sleep", lambda seconds: None)
+
+    sms.wait_until_sent("SM1")
+
+    assert len(checks) == 3

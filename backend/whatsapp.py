@@ -72,7 +72,7 @@ from quotes import (
     signed_link,
     to_pence,
 )
-from sms import download_media, send_whatsapp, send_whatsapp_buttons
+from sms import download_media, send_whatsapp, send_whatsapp_buttons, wait_until_sent
 from voice import from_the_command, transcribe
 
 # Far more quotes than a tradesperson makes in a day, so only a fault or misuse hits it.
@@ -1013,12 +1013,12 @@ def send_with_buttons(to, reply):
     text = reply.text
     try:
         if reply.link:
-            send_whatsapp(to, media_url=reply.link)
+            wait_until_sent(send_whatsapp(to, media_url=reply.link))
             pdf_sent = True
         if "\n" in text:
             # WhatsApp won't put new lines in a button message's gap, so longer replies
             # go first as their own message, with a short prompt above the buttons.
-            send_whatsapp(to, body=text)
+            wait_until_sent(send_whatsapp(to, body=text))
             words_sent, text = True, "What would you like to do?"
         send_whatsapp_buttons(to, template, {"1": text, **gaps})
         return None

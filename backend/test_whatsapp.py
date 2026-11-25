@@ -344,6 +344,7 @@ def use_buttons(monkeypatch, failing=False):
         sent.append((template, variables.get("2")))
 
     monkeypatch.setattr(whatsapp, "send_whatsapp", fake_send_whatsapp)
+    monkeypatch.setattr(whatsapp, "wait_until_sent", lambda message_sid: sent.append(("waited", None)))
     monkeypatch.setattr(whatsapp, "send_whatsapp_buttons", fake_send_whatsapp_buttons)
     return sent
 
@@ -355,7 +356,7 @@ def test_a_draft_quote_gets_make_final_buttons(monkeypatch, tmp_path):
     response = signed_whatsapp(OWNER, "QUOTE Mr Smith | Boiler service | BS | 85")
 
     # The PDF first, then the buttons for the new quote, and nothing in the response.
-    assert sent == [("pdf", True), ("HX_DRAFT", "2")]
+    assert sent == [("pdf", True), ("waited", None), ("HX_DRAFT", "2")]
     assert "<Message>" not in response.text
 
 
@@ -365,7 +366,7 @@ def test_a_final_quote_gets_make_invoice_buttons(monkeypatch, tmp_path):
 
     signed_whatsapp(OWNER, "FINAL 1")
 
-    assert sent == [("pdf", True), ("HX_FINAL", "1")]
+    assert sent == [("pdf", True), ("waited", None), ("HX_FINAL", "1")]
 
 
 def test_a_plain_reply_if_buttons_fail(monkeypatch, tmp_path):
@@ -542,7 +543,7 @@ def test_hi_gets_the_menu(monkeypatch, tmp_path):
     response = signed_whatsapp(OWNER, "Morning")
 
     # The briefing goes first as its own message, then the buttons.
-    assert sent == [("pdf", False), ("HX_MENU", None)]
+    assert sent == [("pdf", False), ("waited", None), ("HX_MENU", None)]
     assert "<Message>" not in response.text
 
 
