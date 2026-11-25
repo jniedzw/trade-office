@@ -33,7 +33,7 @@
     <div class="field"><label>Reference letters</label><input name="ref_letters" value="{{ details.ref_letters if details else '' }}" placeholder="DPL"></div>
     <div class="field"><label>Days to pay</label><input name="payment_days" value="{{ details.payment_days if details else 14 }}"></div>
     <div class="field"><label>Next invoice number <span class="hint">(carries on from theirs)</span></label><input name="invoice_start" value="{{ details.invoice_start if details else 1 }}"></div>
-    <div class="field"><label>Colour</label><input name="brand_colour" value="{{ details.brand_colour if details else '#b8975a' }}"></div>
+    <div class="field"><label>PDF colour <span class="hint">(their own, for quotes and invoices)</span></label><input name="brand_colour" value="{{ details.brand_colour if details else '#b8975a' }}"></div>
     <div class="field"><label>Google review link <span class="hint">(blank for none)</span></label><input name="review_link" value="{{ details.review_link if details else '' }}"></div>
   </div>
   <br><button type="submit">Save details</button>
