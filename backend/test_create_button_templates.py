@@ -1,5 +1,7 @@
 import whatsapp
-from create_button_templates import MAIN_MENU, MENU_NAMES, TEMPLATES, WEEKLY, menu_template, template
+from create_button_templates import (
+    ACCEPTED, MAIN_MENU, MENU_NAMES, TEMPLATES, WEEKLY, accepted_template, menu_template, template,
+)
 
 
 def test_buttons_fit_whatsapps_limits():
@@ -46,3 +48,10 @@ def test_weekly_template_follows_whatsapps_rules():
     # WhatsApp rejects a template that starts or ends with a variable.
     assert not body.startswith("{{") and not body.endswith("}}")
     assert all(whatsapp.is_new_command(button["id"]) for button in WEEKLY["actions"])
+
+
+def test_accepted_template_follows_whatsapps_rules():
+    body = ACCEPTED["body"]
+    assert not body.startswith("{{") and not body.endswith("}}")
+    assert all(whatsapp.is_new_command(button["id"]) for button in ACCEPTED["actions"])
+    assert set(accepted_template()["variables"]) == {"1", "2", "3"}

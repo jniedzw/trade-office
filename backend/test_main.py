@@ -56,6 +56,7 @@ def use_fakes(monkeypatch, tmp_path, active=True, failing=()):
     monkeypatch.setattr(settings, "WHATSAPP_MENU", None)
     monkeypatch.setattr(settings, "WHATSAPP_JOB_BUTTONS", None)
     monkeypatch.setattr(settings, "WHATSAPP_OWED_BUTTONS", None)
+    monkeypatch.setattr(settings, "WHATSAPP_ACCEPTED_TEMPLATE", None)
     for group in ("JOBS", "MONEY", "MORE"):
         monkeypatch.setattr(settings, f"WHATSAPP_{group}_MENU", None)
     # Photos are "downloaded" without reaching Twilio.

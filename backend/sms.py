@@ -90,6 +90,19 @@ def send_weekly_update(to: str, jobs: str, owed: str) -> str:
     return message.sid
 
 
+def send_template(to: str, content_sid: str, variables: dict) -> str:
+    """Send an approved WhatsApp template, so Jack can message first. Return Twilio's message ID."""
+    message = client.messages.create(
+        to=f"whatsapp:{to}",
+        from_=f"whatsapp:{settings.WHATSAPP_NUMBER}",
+        content_sid=content_sid,
+        content_variables=json.dumps(variables),
+        # Delivery updates come here, so a message WhatsApp doesn't deliver goes by SMS.
+        status_callback=f"{settings.PUBLIC_URL}/whatsapp-status",
+    )
+    return message.sid
+
+
 # Claude reads photos up to this size.
 MAX_PHOTO_BYTES = 5 * 1024 * 1024
 

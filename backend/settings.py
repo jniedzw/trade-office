@@ -31,6 +31,8 @@ WHATSAPP_MENU = os.environ.get("WHATSAPP_MENU")
 WHATSAPP_JOB_BUTTONS = os.environ.get("WHATSAPP_JOB_BUTTONS")
 # Optional: the Sunday week-ahead template, once Meta has approved it. No updates go out without it.
 WHATSAPP_WEEKLY_TEMPLATE = os.environ.get("WHATSAPP_WEEKLY_TEMPLATE")
+# Tells the owner a customer accepted a quote. Approved by Meta, since Jack messages first.
+WHATSAPP_ACCEPTED_TEMPLATE = os.environ.get("WHATSAPP_ACCEPTED_TEMPLATE")
 WHATSAPP_OWED_BUTTONS = os.environ.get("WHATSAPP_OWED_BUTTONS")
 # Optional: lets Jack understand voice notes. Without it, he asks for them to be typed.
 ASSEMBLYAI_API_KEY = os.environ.get("ASSEMBLYAI_API_KEY")

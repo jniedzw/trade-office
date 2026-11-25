@@ -3,9 +3,9 @@
 Then put the IDs it prints in .env and in Render's Environment.
 
 Most are only sent as replies inside WhatsApp's 24-hour window, which Twilio
-says needs no approval. The weekly one is the exception: name it on its own
-(python create_button_templates.py WHATSAPP_WEEKLY_TEMPLATE) to create it and
-submit it to Meta.
+says needs no approval. The weekly and quote-accepted ones are the exceptions:
+name each on its own (python create_button_templates.py WHATSAPP_ACCEPTED_TEMPLATE)
+to create it and submit it to Meta.
 """
 
 import sys
@@ -79,6 +79,23 @@ WEEKLY = {
 }
 
 
+# Sent when a customer accepts a quote on their quote page. Jack messages first here too.
+ACCEPTED = {
+    "body": "Good news: {{1}} accepted quote {{2}} for {{3}}. Tap below to book it in.",
+    "actions": [{"title": "Book it in", "id": "BOOK"}],
+}
+
+
+def accepted_template():
+    """Return what the Content API needs to create the quote-accepted template."""
+    return {
+        "friendly_name": "quote_accepted",
+        "language": "en",
+        "variables": {"1": "Mrs Jones", "2": "Q12", "3": "£1,250.50"},
+        "types": {"twilio/quick-reply": ACCEPTED},
+    }
+
+
 def weekly_template():
     """Return what the Content API needs to create the Sunday week-ahead template."""
     return {
@@ -90,9 +107,16 @@ def weekly_template():
     }
 
 
-def submit_for_approval(sid, auth):
+# Templates Jack sends first, which Meta must approve: their name at Meta, and how to make them.
+NEEDS_APPROVAL = {
+    "WHATSAPP_WEEKLY_TEMPLATE": ("weekly_update", weekly_template),
+    "WHATSAPP_ACCEPTED_TEMPLATE": ("quote_accepted", accepted_template),
+}
+
+
+def submit_for_approval(sid, auth, name):
     """Ask WhatsApp to approve a template. Approval can take a day or two."""
-    approval = {"name": "weekly_update", "category": "UTILITY"}
+    approval = {"name": name, "category": "UTILITY"}
     response = requests.post(
         f"{CONTENT_API}/{sid}/ApprovalRequests/whatsapp", json=approval, auth=auth, timeout=30
     )
@@ -121,16 +145,16 @@ def main():
     for name in names:
         if name in MENU_NAMES:
             made = menu_template(name)
-        elif name == "WHATSAPP_WEEKLY_TEMPLATE":
-            made = weekly_template()
+        elif name in NEEDS_APPROVAL:
+            made = NEEDS_APPROVAL[name][1]()
         else:
             made = template(name, TEMPLATES[name])
         response = requests.post(CONTENT_API, json=made, auth=auth, timeout=30)
         response.raise_for_status()
         sid = response.json()["sid"]
         print(f"{name}={sid}")
-        if name == "WHATSAPP_WEEKLY_TEMPLATE":
-            submit_for_approval(sid, auth)
+        if name in NEEDS_APPROVAL:
+            submit_for_approval(sid, auth, NEEDS_APPROVAL[name][0])
 
 
 if __name__ == "__main__":

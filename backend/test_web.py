@@ -493,6 +493,39 @@ def test_a_draft_has_no_customer_page(monkeypatch, tmp_path):
     assert client.get(path).status_code == 403
 
 
+def test_accepting_tells_the_tradesperson_on_whatsapp_when_alerts_are_on(monkeypatch, tmp_path):
+    path = sent_quote(monkeypatch, tmp_path)
+    monkeypatch.setattr(settings, "WHATSAPP_ACCEPTED_TEMPLATE", "HX_ACCEPTED")
+    database.set_whatsapp_alerts(1, True)
+    sent, texts = [], []
+    monkeypatch.setattr(web, "send_template", lambda to, sid, variables: sent.append((to, sid, variables)) or "SM_1")
+    monkeypatch.setattr(alerts, "send_sms", lambda to, body, from_number: texts.append(body))
+
+    client.post(path)
+
+    assert sent == [(OWNER, "HX_ACCEPTED", {"1": "Mrs Jones", "2": "Q1", "3": "£1,250.50"})]
+    assert texts == []
+    # Kept, so it goes by text if WhatsApp doesn't deliver it.
+    assert "accepted quote Q1" in database.pop_pending_alert("SM_1")[1]
+
+
+def test_accepting_texts_the_tradesperson_if_whatsapp_fails(monkeypatch, tmp_path):
+    path = sent_quote(monkeypatch, tmp_path)
+    monkeypatch.setattr(settings, "WHATSAPP_ACCEPTED_TEMPLATE", "HX_ACCEPTED")
+    database.set_whatsapp_alerts(1, True)
+    texts = []
+
+    def broken(to, sid, variables):
+        raise RuntimeError("Twilio is down")
+
+    monkeypatch.setattr(web, "send_template", broken)
+    monkeypatch.setattr(alerts, "send_sms", lambda to, body, from_number: texts.append(body))
+
+    client.post(path)
+
+    assert texts == ["Good news: Mrs Jones accepted quote Q1 for £1,250.50. Message Jack to book it in."]
+
+
 def test_ticking_the_review_box_records_consent(monkeypatch, tmp_path):
     path = sent_quote(monkeypatch, tmp_path)
     monkeypatch.setattr(alerts, "send_sms", lambda to, body, from_number: None)

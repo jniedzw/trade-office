@@ -7,12 +7,15 @@ from fastapi import APIRouter, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+import settings
 from alerts import try_send
 from database import (
     accept_quote,
     get_client,
     get_quote,
     get_quote_lines,
+    save_pending_alert,
+    whatsapp_alerts_on,
     quotes_waiting,
     SESSION_DAYS,
     booked_jobs,
@@ -34,6 +37,7 @@ from database import (
 from diary import day_name, to_uk, uk_now, week_days
 from export import XLSX, make_export
 from pdfs import make_invoice_pdf, make_quote_pdf
+from sms import send_template
 import whatsapp
 from quotes import invoice_label, job_label, link_is_valid, money, quote_label, signed_link
 
@@ -121,14 +125,26 @@ def accept(request: Request, quote_id: int, expires: int = 0, sig: str = "", rev
     quote, client = found
     # Only the first press tells the tradesperson, however many times it's pressed.
     if accept_quote(quote.id, review_ok=review_ok == "yes"):
-        # A text, not WhatsApp: Jack can't start a WhatsApp chat without a template.
-        try_send(
-            client.owner_mobile,
-            f"Good news: {quote.customer_name} accepted quote {quote_label(quote.number)} for "
-            f"{money(quote.total_pence)}. Message Jack to book it in.",
-            client.twilio_number,
-        )
+        tell_owner_accepted(client, quote)
     return quote_page(request, get_quote(quote.id), client)
+
+
+def tell_owner_accepted(client, quote):
+    """Tell the owner a customer accepted, on WhatsApp if we can, otherwise by text."""
+    label, total = quote_label(quote.number), money(quote.total_pence)
+    text = f"Good news: {quote.customer_name} accepted quote {label} for {total}. Message Jack to book it in."
+    if settings.WHATSAPP_NUMBER and settings.WHATSAPP_ACCEPTED_TEMPLATE and whatsapp_alerts_on(client.id):
+        try:
+            message_sid = send_template(
+                client.owner_mobile, settings.WHATSAPP_ACCEPTED_TEMPLATE,
+                {"1": quote.customer_name, "2": label, "3": total},
+            )
+            # Like missed-call alerts: if WhatsApp doesn't deliver it, the text goes instead.
+            save_pending_alert(message_sid, client.id, text)
+            return
+        except Exception as error:
+            print(f"WhatsApp accepted alert failed: {type(error).__name__}", flush=True)
+    try_send(client.owner_mobile, text, client.twilio_number)
 
 
 @router.get("/login/{token}", response_class=HTMLResponse)
