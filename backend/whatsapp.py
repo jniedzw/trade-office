@@ -11,6 +11,11 @@ import settings
 from ai import change_quote, read_booking, read_job, read_quote
 from alerts import alert_james
 from database import (
+    cancel_job,
+    get_invoice_by_number,
+    remember_change,
+    snapshot,
+    undo_last_change,
     final_quote_for_job,
     jobs_for_customer,
     mark_job_done,
@@ -198,6 +203,7 @@ def final_reply(client, ref):
         return problem
     if quote is None:
         return Reply("To finish a quote, send FINAL and its number or the customer's name, like FINAL Q3.")
+    remember(client, f"quote {quote_label(quote.number)} made final", ("quote", quote.id, ["status"]))
     finish_quote(client.id, quote.id)
     return with_pdf(
         f"Quote {quote_label(quote.number)} is final. Forward this PDF to {quote.customer_name}.",
@@ -269,7 +275,7 @@ def is_new_command(command):
     to 1300"), so only messages that can't be an answer count as commands.
     """
     words = command.split()
-    if command in ("ALERTS ON", "ALERTS OFF", "PRICES", "HELP", "OWED", "PAID", "WEEK", "EXPORT", "PAGE", "DONE"):
+    if command in ("ALERTS ON", "ALERTS OFF", "PRICES", "HELP", "OWED", "PAID", "WEEK", "EXPORT", "PAGE", "DONE", "UNDO"):
         return True
     if words[:1] in (["QUOTE"], ["LOG"], ["BOOK"]):
         return True
@@ -277,7 +283,7 @@ def is_new_command(command):
     # A name ("final price 1300") could be part of an answer, so only numbers count here.
     if words[:1] in (["FINAL"], ["INVOICE"], ["CHANGE"], ["PAID"]) and len(words) > 1:
         return read_number(words[1], ("INVOICE", "INV", "Q")) is not None
-    if words[:1] == ["DONE"] and len(words) > 1:
+    if words[:1] in (["DONE"], ["MOVE"], ["CANCEL"]) and len(words) > 1:
         return read_number(words[1], ("JOB", "J"), need_prefix=True) is not None
     return False
 
@@ -357,6 +363,10 @@ def change_for(client, quote, change):
             f"Sorry, I couldn't make that change. If it's a new price, include it, "
             f"like: CHANGE {label} price is 1300"
         )
+    remember(
+        client, f"the change to quote {label}",
+        ("quote", quote.id, ["customer_name", "title", "job_code", "total_pence", "status"]),
+    )
     update_quote(quote.id, **changed)
     count = len(changed["lines"])
     lines = "1 line" if count == 1 else f"{count} lines"
@@ -474,6 +484,13 @@ def paid_reply(client, details):
             return Reply(f"{ref} has more than one unpaid invoice: {choices}. Which one? Send PAID and its number.")
         number = theirs[0]["number"]
     label = invoice_label(number)
+    invoice = get_invoice_by_number(client.id, number)
+    if invoice is not None and invoice.paid_at is None:
+        rows = [("invoice", invoice.id, ["paid_at"])]
+        job_id = get_quote(invoice.quote_id).job_id
+        if job_id is not None:
+            rows.append(("job", job_id, ["status"]))
+        remember(client, f"{label} marked as paid", *rows)
     result = mark_paid(client.id, number)
     if result is None:
         return Reply(f"There's no invoice {label} for {client.business_name}.")
@@ -515,8 +532,68 @@ def book_from_answer(client, job_id, answer):
         ask_question(client.id, "book_job", job.id)
         return Reply(f"When's {job.customer_name}'s job? I couldn't tell from that. Like: Monday 9am.")
     starts_at, ends_on = booking
+    # Moving a job that was already booked, or booking it for the first time.
+    verb = "Moved" if job.starts_at else "Booked"
+    remember(
+        client, f"{job_label(job.number)} {verb.lower()} to {when(starts_at, ends_on)}",
+        ("job", job.id, ["starts_at", "ends_on", "status"]),
+    )
     book_job(job.id, starts_at, ends_on)
-    return Reply(f"Booked: {job.customer_name}, {job.work}, {when(starts_at, ends_on)}.")
+    return Reply(f"{verb}: {job.customer_name}, {job.work}, {when(starts_at, ends_on)}.")
+
+
+MOVE_HELP = "To move a job, send MOVE, the job and the new time, like:\nMOVE J4 Thursday 2pm\nMOVE Mrs Jones to Thursday 2pm"
+
+
+def move_reply(client, details):
+    """Move a booked job to a new time: "MOVE J4 Thursday 2pm" or "MOVE Mrs Jones to Thursday"."""
+    text = details.strip()
+    first, _, rest = text.partition(" ")
+    if read_number(first, ("JOB", "J"), need_prefix=True) is not None:
+        ref, new_time = first, rest
+    else:
+        # With a name, " to " splits who from when: "Mrs Jones to Thursday 2pm".
+        ref, found, new_time = text.rpartition(" to ")
+        if not found:
+            return Reply(MOVE_HELP)
+    job, problem = find_job(client, ref)
+    if problem:
+        return problem
+    if job is None:
+        return Reply(MOVE_HELP)
+    if new_time.strip() == "":
+        ask_question(client.id, "book_job", job.id)
+        return Reply(f"When should {job_label(job.number)} move to? Like: Thursday 2pm.")
+    return book_from_answer(client, job.id, new_time)
+
+
+def cancel_reply(client, details):
+    """Cancel a job: it's kept, but comes out of the diary."""
+    job, problem = find_job(client, details)
+    if problem:
+        return problem
+    if job is None:
+        return Reply("To cancel a job, send CANCEL and its number, like CANCEL J4, or the customer's name.")
+    label = job_label(job.number)
+    remember(client, f"{label} cancelled", ("job", job.id, ["status"]))
+    cancel_job(job.id)
+    return Reply(f"Cancelled {label}: {job.customer_name}, {job.work}. It's off your diary. Send UNDO if that was a mistake.")
+
+
+def undo_reply(client):
+    """Put back the last change Jack made."""
+    description = undo_last_change(client.id)
+    if description is None:
+        return Reply("There's nothing to undo. I can undo the last change from the past 24 hours.")
+    return Reply(f"Undone: {description}.")
+
+
+def remember(client, description, *rows):
+    """Keep rows as they are now, before a change, so UNDO can put them back.
+
+    Each row is (table, its ID, the fields that will change).
+    """
+    remember_change(client.id, description, [snapshot(table, row_id, fields) for table, row_id, fields in rows])
 
 
 def week_reply(client):
@@ -575,6 +652,7 @@ def done_reply(client, details):
     if job is None:
         ask_question(client.id, "job_done", 0)
         return Reply("Which job's done? Send its number, like J4, or the customer's name.")
+    remember(client, f"{job_label(job.number)} marked done", ("job", job.id, ["status", "done_at"]))
     mark_job_done(job.id)
     text = f"Done: {job_label(job.number)}, {job.customer_name}, {job.work}. Nice one."
     quote = final_quote_for_job(job.id)
@@ -615,6 +693,9 @@ COMMANDS = {
     "EXPORT": lambda client, rest: export_reply(client),
     "PAGE": lambda client, rest: page_reply(client),
     "DONE": lambda client, rest: done_reply(client, rest),
+    "MOVE": lambda client, rest: move_reply(client, rest),
+    "CANCEL": lambda client, rest: cancel_reply(client, rest),
+    "UNDO": lambda client, rest: undo_reply(client),
 }
 
 

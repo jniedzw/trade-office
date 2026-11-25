@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 import secrets
 from datetime import date, datetime, timedelta, timezone
@@ -18,6 +19,8 @@ ALERT_WAIT_MINUTES = 2
 REPEAT_HOURS = 24
 # Jack forgets a question that hasn't been answered in this many hours.
 QUESTION_HOURS = 24
+# UNDO only works on a change made in the last this many hours.
+UNDO_HOURS = 24
 # A login link works for this many minutes, and a login lasts this many days.
 LOGIN_LINK_MINUTES = 15
 SESSION_DAYS = 30
@@ -223,6 +226,19 @@ class WebSession(SQLModel, table=True):
     token_hash: str = Field(unique=True, index=True)
     client_id: int = Field(foreign_key="client.id")
     expires_at: datetime
+
+
+class UndoStep(SQLModel, table=True):
+    """The last change Jack made for a client, kept so UNDO can put it back."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    # Only the latest change can be undone, so there's one row per client.
+    client_id: int = Field(foreign_key="client.id", unique=True)
+    # What changed, for Jack's reply, like "INV-0244 marked as paid".
+    description: str
+    # The rows as they were before, as JSON: [{"table": "job", "id": 4, "fields": {...}}].
+    before: str
+    time: datetime = Field(default_factory=now_utc)
 
 
 class PendingQuestion(SQLModel, table=True):
@@ -617,7 +633,9 @@ def booked_jobs(client_id, since):
     """
     with Session(engine) as session:
         statement = select(Job).where(
-            Job.client_id == client_id, Job.starts_at >= since - timedelta(days=60)
+            Job.client_id == client_id,
+            Job.starts_at >= since - timedelta(days=60),
+            Job.status != "cancelled",
         )
         return session.exec(statement).all()
 
@@ -781,8 +799,98 @@ def same_customer(saved_name, typed_name):
     return typed != "" and (saved == typed or typed in saved)
 
 
-# Jobs still to finish: done, invoiced and paid jobs are past this.
+# Jobs still to finish: done, invoiced, paid and cancelled jobs are past this.
 OPEN_JOB = ("logged", "quoted", "booked")
+
+
+def cancel_job(job_id):
+    """Mark a job as cancelled. It's kept, but leaves the diary."""
+    with Session(engine) as session:
+        job = session.get(Job, job_id)
+        job.status = "cancelled"
+        session.add(job)
+        session.commit()
+
+
+def get_invoice_by_number(client_id, number):
+    """Return this client's invoice with this number (INV-0244 is 244), or None."""
+    with Session(engine) as session:
+        statement = select(Invoice).where(Invoice.client_id == client_id, Invoice.number == number)
+        return session.exec(statement).first()
+
+
+# The tables UNDO can put back, by name.
+UNDOABLE = {"job": Job, "quote": Quote, "invoice": Invoice}
+
+
+def to_json_value(value):
+    """Return a value that JSON can hold, keeping dates and times as tagged text."""
+    if isinstance(value, datetime):
+        return {"datetime": value.isoformat()}
+    if isinstance(value, date):
+        return {"date": value.isoformat()}
+    return value
+
+
+def from_json_value(value):
+    """Undo to_json_value."""
+    if isinstance(value, dict) and "datetime" in value:
+        return datetime.fromisoformat(value["datetime"])
+    if isinstance(value, dict) and "date" in value:
+        return date.fromisoformat(value["date"])
+    return value
+
+
+def snapshot(table, row_id, fields):
+    """Return how a row looks now, for the fields a change will touch."""
+    with Session(engine) as session:
+        row = session.get(UNDOABLE[table], row_id)
+        state = {"table": table, "id": row_id, "fields": {f: to_json_value(getattr(row, f)) for f in fields}}
+        if table == "quote":
+            # A change rewrites a quote's lines too, so keep those.
+            lines = session.exec(select(QuoteLine).where(QuoteLine.quote_id == row_id).order_by(QuoteLine.position))
+            state["lines"] = [line.text for line in lines]
+        return state
+
+
+def remember_change(client_id, description, snapshots):
+    """Keep the rows as they were before a change, so UNDO can put them back.
+
+    Replaces whatever was remembered before: only the latest change can be undone.
+    """
+    with Session(engine) as session:
+        old = session.exec(select(UndoStep).where(UndoStep.client_id == client_id)).first()
+        if old is not None:
+            session.delete(old)
+            session.flush()
+        session.add(UndoStep(client_id=client_id, description=description, before=json.dumps(snapshots)))
+        session.commit()
+
+
+def undo_last_change(client_id):
+    """Put back the client's last remembered change. Return its description, or None."""
+    with Session(engine) as session:
+        step = session.exec(select(UndoStep).where(UndoStep.client_id == client_id)).first()
+        if step is None:
+            return None
+        session.delete(step)
+        if as_utc(step.time) < now_utc() - timedelta(hours=UNDO_HOURS):
+            session.commit()
+            return None
+        for state in json.loads(step.before):
+            row = session.get(UNDOABLE[state["table"]], state["id"])
+            for field, value in state["fields"].items():
+                setattr(row, field, from_json_value(value))
+            session.add(row)
+            if "lines" in state:
+                old_lines = session.exec(select(QuoteLine).where(QuoteLine.quote_id == row.id))
+                for line in old_lines:
+                    session.delete(line)
+                for position, text in enumerate(state["lines"]):
+                    session.add(QuoteLine(quote_id=row.id, position=position, text=text))
+        # One commit: the whole change comes back, or none of it.
+        session.commit()
+        return step.description
 
 
 def jobs_for_customer(client_id, name, statuses=OPEN_JOB):

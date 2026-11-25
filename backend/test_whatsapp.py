@@ -1043,3 +1043,112 @@ def test_a_paid_job_stays_paid_when_marked_done(monkeypatch, tmp_path):
     database.mark_job_done(job_id)
 
     assert database.get_job(job_id).status == "paid"
+
+
+THURSDAY_2PM = datetime(2026, 11, 12, 14, 0, tzinfo=ZoneInfo("Europe/London"))
+
+
+def test_move_a_job_by_number(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    job_id = log_test_job()
+    database.book_job(job_id, MONDAY_9AM)
+    monkeypatch.setattr(whatsapp, "read_booking", lambda message, now_uk: (THURSDAY_2PM, None))
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "MOVE J1 thursday 2pm")
+
+    assert text == "Moved: Mrs Jones, Leaking radiator, Thu 12 Nov, 2pm."
+
+
+def test_move_a_job_by_name(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    database.book_job(log_test_job(), MONDAY_9AM)
+    heard = []
+
+    def fake_read_booking(message, now_uk):
+        heard.append(message)
+        return THURSDAY_2PM, None
+
+    monkeypatch.setattr(whatsapp, "read_booking", fake_read_booking)
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "move mrs jones to thursday 2pm")
+
+    assert text.startswith("Moved: Mrs Jones")
+    # Only the time goes to the AI, not the name.
+    assert heard == ["thursday 2pm"]
+
+
+def test_cancel_takes_a_job_out_of_the_diary(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    job_id = log_test_job()
+    database.book_job(job_id, datetime.now(ZoneInfo("Europe/London")) + timedelta(days=1))
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "CANCEL J1")
+
+    assert text.startswith("Cancelled J1: Mrs Jones")
+    assert database.get_job(job_id).status == "cancelled"
+    assert database.booked_jobs(1, database.now_utc()) == []
+
+
+def test_undo_puts_back_a_cancelled_job(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    job_id = log_test_job()
+    database.book_job(job_id, MONDAY_9AM)
+    whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "CANCEL J1")
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "undo")
+
+    assert text == "Undone: J1 cancelled."
+    assert database.get_job(job_id).status == "booked"
+
+
+def test_undo_a_payment_and_its_job(monkeypatch, tmp_path):
+    use_final_quote(monkeypatch, tmp_path)
+    job_id = log_test_job()
+    quote_id = database.save_quote(1, "Mrs Jones", "Radiator", "RAD", 45000, job_id=job_id)
+    database.save_invoice(1, quote_id, "12 Test Road")
+    whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "PAID INV-0001")
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "UNDO")
+
+    assert text == "Undone: INV-0001 marked as paid."
+    assert database.unpaid_invoices(1) != []
+    assert database.get_job(job_id).status == "invoiced"
+
+
+def test_undo_a_change_to_a_quote(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+    database.update_quote(1, "Mrs Jones", "Bathroom refit", "BR", 125050, ["Fit basin"])
+    use_fake_change(monkeypatch, CHANGED)
+    whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "CHANGE Q1 price is 1300")
+
+    whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "UNDO")
+
+    assert database.get_quote(1).total_pence == 125050
+    assert database.get_quote_lines(1) == ["Fit basin"]
+
+
+def test_undo_only_works_once(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    log_test_job()
+    whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "DONE J1")
+    whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "UNDO")
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "UNDO")
+
+    assert text.startswith("There's nothing to undo")
+
+
+def test_an_old_change_cant_be_undone(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    log_test_job()
+    whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "DONE J1")
+    with Session(database.engine) as session:
+        step = session.exec(select(database.UndoStep)).first()
+        step.time = database.now_utc() - timedelta(hours=25)
+        session.add(step)
+        session.commit()
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "UNDO")
+
+    assert text.startswith("There's nothing to undo")
+    assert database.get_job(1).status == "done"
