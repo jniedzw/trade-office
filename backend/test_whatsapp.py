@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 from sqlmodel import Session, select
 
+import alerts
 import database
 import diary
 import export
@@ -14,6 +15,7 @@ import settings
 import whatsapp
 from database import Client
 from test_main import (
+    OUR_NUMBER,
     JAMES,
     MOBILE_CALLER,
     OWNER,
@@ -138,7 +140,7 @@ def test_final_makes_a_quote_final(monkeypatch, tmp_path):
 
     text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "final 1")
 
-    assert text == "Quote Q1 is final. Forward this PDF to Mrs Jones."
+    assert text == "Quote Q1 is final. Tap Send to customer to text it to Mrs Jones, or forward this PDF yourself."
     assert link.startswith(f"{settings.PUBLIC_URL}/quotes/1.pdf")
     assert database.get_quote(1).status == "final"
 
@@ -1152,3 +1154,73 @@ def test_an_old_change_cant_be_undone(monkeypatch, tmp_path):
 
     assert text.startswith("There's nothing to undo")
     assert database.get_job(1).status == "done"
+
+
+def use_sms_log(monkeypatch):
+    """Keep every text "sent" as (to, body), on top of use_fakes."""
+    sent = []
+
+    def fake_send_sms(to, body, from_number):
+        assert from_number == OUR_NUMBER  # always from the tradesperson's own number
+        sent.append((to, body))
+
+    monkeypatch.setattr(alerts, "send_sms", fake_send_sms)
+    return sent
+
+
+def final_job_quote(phone="+447700900123"):
+    """Save a job with a mobile, and a final quote for it. Return the quote's ID."""
+    job_id = database.save_job(1, "Mrs Jones", "Leaking radiator", customer_phone=phone)
+    quote_id = database.save_quote(1, "Mrs Jones", "Radiator", "RAD", 45000, job_id=job_id)
+    database.finish_quote(1, quote_id)
+    return quote_id
+
+
+def test_send_texts_the_quote_link_to_the_customer(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+    texts = use_sms_log(monkeypatch)
+    quote_id = final_job_quote()
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "SEND Q2")
+
+    assert text.startswith("Sent quote Q2 to Mrs Jones (+447700900123)")
+    [(to, body)] = texts
+    assert to == "+447700900123"
+    assert f"{settings.PUBLIC_URL}/q/{quote_id}?expires=" in body
+    assert database.get_quote(quote_id).sent_at is not None
+
+
+def test_send_asks_for_a_mobile_when_there_isnt_one(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+    texts = use_sms_log(monkeypatch)
+    database.finish_quote(1, 1)
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "SEND Q1")
+    assert text == "What's Mrs Jones's mobile number? I'll text them the quote."
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "0151 496 0000")
+    assert text.startswith("That doesn't look like a UK mobile")
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "07700 900456")
+    assert text.startswith("Sent quote Q1 to Mrs Jones (+447700900456)")
+    assert [to for to, body in texts] == ["+447700900456"]
+
+
+def test_a_draft_cant_be_sent(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "SEND Q1")
+
+    assert text.startswith("Quote Q1 is still a draft")
+
+
+def test_no_text_to_a_customer_who_said_stop(monkeypatch, tmp_path):
+    use_quote_links(monkeypatch, tmp_path)
+    texts = use_sms_log(monkeypatch)
+    final_job_quote()
+    database.opt_out(1, "+447700900123")
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "SEND Q2")
+
+    assert "replied STOP" in text
+    assert texts == []

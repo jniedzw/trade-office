@@ -111,6 +111,10 @@ class Quote(SQLModel, table=True):
     job_id: int | None = None
     # Each client's quotes are numbered 1, 2, 3..., shown as Q1, Q2, Q3.
     number: int | None = None
+    # The mobile it was texted to, and when it was sent and accepted, if it has been.
+    customer_phone: str | None = None
+    sent_at: datetime | None = None
+    accepted_at: datetime | None = None
 
 
 class QuoteLine(SQLModel, table=True):
@@ -267,6 +271,9 @@ NEW_COLUMNS = [
     ("quote", "number", "INTEGER"),
     ("businessdetails", "invoice_start", "INTEGER NOT NULL DEFAULT 1"),
     ("job", "done_at", "DATETIME"),
+    ("quote", "customer_phone", "VARCHAR"),
+    ("quote", "sent_at", "DATETIME"),
+    ("quote", "accepted_at", "DATETIME"),
 ]
 
 
@@ -909,6 +916,28 @@ def mark_job_done(job_id):
             job.status = "done"
         session.add(job)
         session.commit()
+
+
+def mark_quote_sent(quote_id, phone):
+    """Record that a quote was texted to the customer at this mobile."""
+    with Session(engine) as session:
+        quote = session.get(Quote, quote_id)
+        quote.customer_phone = phone
+        quote.sent_at = now_utc()
+        session.add(quote)
+        session.commit()
+
+
+def accept_quote(quote_id):
+    """Record that the customer accepted a quote. Return False if they already had."""
+    with Session(engine) as session:
+        quote = session.get(Quote, quote_id)
+        if quote.accepted_at is not None:
+            return False
+        quote.accepted_at = now_utc()
+        session.add(quote)
+        session.commit()
+        return True
 
 
 def final_quote_for_job(job_id):

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{# The page a customer sees from the text: their quote, from the tradesperson's business. #}
+{% block title %}Your quote from {{ business_name }}{% endblock %}
+{% block header %}<strong>{{ business_name }}</strong>{% endblock %}
+{% block content %}
+<div class="card">
+  <p class="muted">Quote {{ label }} for {{ quote.customer_name }}</p>
+  <h1>{{ quote.title }}</h1>
+  {% if lines %}
+  <ul>
+    {% for line in lines %}<li>{{ line }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+  <p style="font-size: 1.6rem; font-weight: 800; margin: 16px 0 4px;">{{ total }}</p>
+  <p><a href="{{ pdf_link }}">Download the quote as a PDF</a></p>
+</div>
+
+{% if quote.accepted_at %}
+<div class="card">
+  <h2 style="margin-top: 0;">Thanks, you've accepted this quote</h2>
+  <p>{{ business_name }} will be in touch to arrange a date.</p>
+</div>
+{% else %}
+<form method="post">
+  <button type="submit">Accept quote</button>
+</form>
+<p class="muted">Questions first? Just reply to the text{% if contact %}, or contact {{ contact }}{% endif %}.</p>
+{% endif %}
+{% endblock %}

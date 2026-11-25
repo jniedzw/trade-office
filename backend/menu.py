@@ -21,7 +21,7 @@ MENU_CHOICES = [
 ]
 
 # Commands reached another way: by buttons, or typed with a quote number.
-NOT_IN_MENU = ["FINAL", "CHANGE", "INVOICE", "PRICE", "MARKUP", "ALERTS", "EXPORT", "MOVE", "CANCEL", "UNDO"]
+NOT_IN_MENU = ["FINAL", "CHANGE", "INVOICE", "PRICE", "MARKUP", "ALERTS", "EXPORT", "MOVE", "CANCEL", "UNDO", "SEND"]
 
 # What Jack says to anything he doesn't recognise, like "morning".
 MENU_TEXT = "Hi, it's Jack. What do you need? Tap Options."
@@ -32,6 +32,7 @@ HELP_TEXT = (
     "QUOTE and the job, in your own words\n"
     "CHANGE Q6 and what to change\n"
     "FINAL Q6, or FINAL and the customer's name\n"
+    "SEND Q6 to text a final quote to the customer\n"
     "INVOICE Q6, or INVOICE and the customer's name\n"
     "BOOK and the job and when, to book it in\n"
     "WEEK to see what's on\n"

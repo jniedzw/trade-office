@@ -8,9 +8,11 @@ from typing import NamedTuple
 import ai
 import export
 import settings
-from ai import change_quote, read_booking, read_job, read_quote
-from alerts import alert_james
+from ai import change_quote, read_booking, read_job, read_quote, uk_mobile
+from alerts import alert_james, try_send
 from database import (
+    is_opted_out,
+    mark_quote_sent,
     cancel_job,
     get_invoice_by_number,
     remember_change,
@@ -54,6 +56,7 @@ from diary import uk_now, week_ahead, when
 from menu import HELP_TEXT, MENU_TEXT, command_for_title
 from quotes import (
     QUOTE_HELP,
+    customer_quote_link,
     invoice_label,
     job_label,
     money,
@@ -206,7 +209,8 @@ def final_reply(client, ref):
     remember(client, f"quote {quote_label(quote.number)} made final", ("quote", quote.id, ["status"]))
     finish_quote(client.id, quote.id)
     return with_pdf(
-        f"Quote {quote_label(quote.number)} is final. Forward this PDF to {quote.customer_name}.",
+        f"Quote {quote_label(quote.number)} is final. Tap Send to customer to text it to "
+        f"{quote.customer_name}, or forward this PDF yourself.",
         "quote",
         quote.id,
         buttons_for(settings.WHATSAPP_FINAL_BUTTONS, quote.number),
@@ -281,7 +285,7 @@ def is_new_command(command):
         return True
     # FINAL Q6, INVOICE Q6, CHANGE Q6 and PAID INV-0244 need a number straight after.
     # A name ("final price 1300") could be part of an answer, so only numbers count here.
-    if words[:1] in (["FINAL"], ["INVOICE"], ["CHANGE"], ["PAID"]) and len(words) > 1:
+    if words[:1] in (["FINAL"], ["INVOICE"], ["CHANGE"], ["PAID"], ["SEND"]) and len(words) > 1:
         return read_number(words[1], ("INVOICE", "INV", "Q")) is not None
     if words[:1] in (["DONE"], ["MOVE"], ["CANCEL"]) and len(words) > 1:
         return read_number(words[1], ("JOB", "J"), need_prefix=True) is not None
@@ -399,6 +403,8 @@ def answer_question(client, question, answer):
         return book_reply(client, answer)
     if asked == "job_done":
         return done_reply(client, answer)
+    if asked == "customer_mobile":
+        return mobile_answer(client, quote_id, answer)
     return Reply("Sorry, I lost track of that. Please start again.")
 
 
@@ -580,6 +586,56 @@ def cancel_reply(client, details):
     return Reply(f"Cancelled {label}: {job.customer_name}, {job.work}. It's off your diary. Send UNDO if that was a mistake.")
 
 
+def send_reply(client, details):
+    """Text a final quote to the customer, asking for their mobile if Jack doesn't have it."""
+    quote, problem = find_quote(client, details, "final")
+    if problem:
+        return problem
+    if quote is None:
+        return Reply("To text a quote to the customer, send SEND and its number, like SEND Q12.")
+    label = quote_label(quote.number)
+    if quote.status != "final":
+        return Reply(f"Quote {label} is still a draft. Send FINAL {label} first, so you've checked it.")
+    job = get_job(quote.job_id) if quote.job_id else None
+    phone = quote.customer_phone or (job.customer_phone if job else None)
+    if phone is None:
+        ask_question(client.id, "customer_mobile", quote.id)
+        return Reply(f"What's {quote.customer_name}'s mobile number? I'll text them the quote.")
+    return send_quote_to(client, quote, phone)
+
+
+def send_quote_to(client, quote, phone):
+    """Text the customer a link to their quote, from the tradesperson's own number."""
+    if is_opted_out(client.id, phone):
+        return Reply(
+            f"{quote.customer_name} replied STOP to your texts, so I can't text them. "
+            "Forward the PDF yourself instead."
+        )
+    link = customer_quote_link(quote.id, now_utc())
+    text = (
+        f"Hi {quote.customer_name}, here's your quote from {client.business_name} for "
+        f"{quote.title}, {money(quote.total_pence)}: {link}\nAny questions, just reply to this text."
+    )
+    if not try_send(phone, text, client.twilio_number):
+        alert_james(client, "couldn't text a quote to a customer.")
+        return Reply("Sorry, that text didn't go through. We've been told. Forward the PDF yourself for now.")
+    mark_quote_sent(quote.id, phone)
+    return Reply(
+        f"Sent quote {quote_label(quote.number)} to {quote.customer_name} ({phone}). "
+        "I'll text you if they accept."
+    )
+
+
+def mobile_answer(client, quote_id, answer):
+    """Use the customer's mobile Jack asked for, or ask again if it isn't one."""
+    phone = uk_mobile(answer, answer)
+    quote = get_quote(quote_id)
+    if phone is None:
+        ask_question(client.id, "customer_mobile", quote_id)
+        return Reply(f"That doesn't look like a UK mobile. What's {quote.customer_name}'s mobile, like 07700 900123?")
+    return send_quote_to(client, quote, phone)
+
+
 def undo_reply(client):
     """Put back the last change Jack made."""
     description = undo_last_change(client.id)
@@ -696,6 +752,7 @@ COMMANDS = {
     "MOVE": lambda client, rest: move_reply(client, rest),
     "CANCEL": lambda client, rest: cancel_reply(client, rest),
     "UNDO": lambda client, rest: undo_reply(client),
+    "SEND": lambda client, rest: send_reply(client, rest),
 }
 
 

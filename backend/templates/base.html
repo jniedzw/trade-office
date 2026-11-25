@@ -27,6 +27,7 @@
 </head>
 <body>
   <header>
+    {% block header %}
     <strong>Ask Jack</strong>{% if client %} · {{ client.business_name }}{% endif %}
     {% if client %}
     <nav>
@@ -35,6 +36,7 @@
       <a href="/money">Money</a>
     </nav>
     {% endif %}
+    {% endblock %}
   </header>
   <main>
     {% block content %}{% endblock %}

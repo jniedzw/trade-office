@@ -6,7 +6,12 @@ from fastapi import APIRouter, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from alerts import try_send
 from database import (
+    accept_quote,
+    get_client,
+    get_quote,
+    get_quote_lines,
     SESSION_DAYS,
     booked_jobs,
     client_for_session,
@@ -21,7 +26,7 @@ from database import (
 )
 from diary import day_name, to_uk, uk_now, week_days
 from export import XLSX, make_export
-from quotes import invoice_label, money
+from quotes import invoice_label, link_is_valid, money, quote_label, signed_link
 
 router = APIRouter()
 # Found next to this file, whichever folder the server is started from.
@@ -42,6 +47,60 @@ def logged_out(request):
         heading="Log in from WhatsApp",
         text="Message Jack on WhatsApp and tap My page. Jack will send you a link to log in.",
     )
+
+
+def customer_quote(request, quote_id, expires, sig):
+    """Return the customer's quote, its client and details, or None if the link isn't right."""
+    if not link_is_valid("customer", quote_id, expires, sig, now_utc()):
+        return None
+    quote = get_quote(quote_id)
+    client = get_client(quote.client_id) if quote else None
+    # A paused client's quotes can't be accepted, and drafts were never sent.
+    if client is None or not client.active or quote.status != "final":
+        return None
+    return quote, client
+
+
+def quote_page(request, quote, client):
+    """The customer's quote page."""
+    details = get_business_details(client.id)
+    return page(
+        request, "customer_quote.html", quote=quote, business_name=client.business_name,
+        label=quote_label(quote.number), lines=get_quote_lines(quote.id), total=money(quote.total_pence),
+        pdf_link=signed_link("quote", quote.id, now_utc()), contact=details.contact if details else "",
+    )
+
+
+def link_gone(request):
+    """What a customer sees when their quote link is old or wrong."""
+    return page(
+        request, "message.html", status_code=403, heading="This link has expired",
+        text="Please ask the tradesperson who sent it for a new one.",
+    )
+
+
+@router.get("/q/{quote_id}", response_class=HTMLResponse)
+def see_quote(request: Request, quote_id: int, expires: int = 0, sig: str = ""):
+    found = customer_quote(request, quote_id, expires, sig)
+    return quote_page(request, *found) if found else link_gone(request)
+
+
+@router.post("/q/{quote_id}", response_class=HTMLResponse)
+def accept(request: Request, quote_id: int, expires: int = 0, sig: str = ""):
+    found = customer_quote(request, quote_id, expires, sig)
+    if not found:
+        return link_gone(request)
+    quote, client = found
+    # Only the first press tells the tradesperson, however many times it's pressed.
+    if accept_quote(quote.id):
+        # A text, not WhatsApp: Jack can't start a WhatsApp chat without a template.
+        try_send(
+            client.owner_mobile,
+            f"Good news: {quote.customer_name} accepted quote {quote_label(quote.number)} for "
+            f"{money(quote.total_pence)}. Message Jack to book it in.",
+            client.twilio_number,
+        )
+    return quote_page(request, get_quote(quote.id), client)
 
 
 @router.get("/login/{token}", response_class=HTMLResponse)

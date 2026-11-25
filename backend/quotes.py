@@ -145,11 +145,26 @@ def link_signature(kind, item_id, expires):
     return hmac.new(secret, message, hashlib.sha256).hexdigest()
 
 
-def signed_link(kind, item_id, now, lasts=timedelta(days=LINK_DAYS), extension="pdf"):
-    """Return a private link to a file that stops working once the time in lasts is up."""
+def signed_link(kind, item_id, now, lasts=timedelta(days=LINK_DAYS), extension="pdf", path=None):
+    """Return a private link that stops working once the time in lasts is up.
+
+    It points at /{kind}s/{id}.{extension}, like /quotes/12.pdf, unless path says otherwise.
+    """
     expires = int((now + lasts).timestamp())
     signature = link_signature(kind, item_id, expires)
-    return f"{settings.PUBLIC_URL}/{kind}s/{item_id}.{extension}?expires={expires}&sig={signature}"
+    where = path or f"/{kind}s/{item_id}.{extension}"
+    return f"{settings.PUBLIC_URL}{where}?expires={expires}&sig={signature}"
+
+
+# How long a customer's quote page works: long enough to think it over.
+CUSTOMER_LINK_DAYS = 30
+
+
+def customer_quote_link(quote_id, now):
+    """Return the private link a customer gets to see and accept their quote."""
+    return signed_link(
+        "customer", quote_id, now, lasts=timedelta(days=CUSTOMER_LINK_DAYS), path=f"/q/{quote_id}"
+    )
 
 
 def link_is_valid(kind, item_id, expires, signature, now):

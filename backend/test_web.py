@@ -4,9 +4,12 @@ from io import BytesIO
 from openpyxl import load_workbook
 from sqlmodel import Session, select
 
+import alerts
 import database
 import diary
 import export
+import quotes
+import settings
 import whatsapp
 from database import Client, LoginLink
 from test_main import OWNER, client, use_fakes
@@ -235,3 +238,49 @@ def test_every_page_needs_logging_in(monkeypatch, tmp_path):
 
     for path in ["/me", "/customers", "/money", "/download"]:
         assert client.get(path).status_code == 401, path
+
+
+def sent_quote(monkeypatch, tmp_path, status="final"):
+    """Save quote 1 for Mrs Jones, and return the path of her quote page."""
+    use_fakes(monkeypatch, tmp_path)
+    monkeypatch.setattr(settings, "QUOTE_LINK_SECRET", "test-secret")
+    quote_id = database.save_quote(1, "Mrs Jones", "Bathroom refit", "BR", 125050, ["Fit basin"])
+    if status == "final":
+        database.finish_quote(1, quote_id)
+    return quotes.customer_quote_link(quote_id, database.now_utc()).removeprefix(settings.PUBLIC_URL)
+
+
+def test_the_customer_sees_their_quote(monkeypatch, tmp_path):
+    path = sent_quote(monkeypatch, tmp_path)
+
+    text = client.get(path).text
+
+    assert "Bathroom refit" in text and "£1,250.50" in text and "Fit basin" in text
+    assert "Accept quote" in text
+    assert "Test Plumbing" in text
+
+
+def test_accepting_tells_the_tradesperson_once(monkeypatch, tmp_path):
+    path = sent_quote(monkeypatch, tmp_path)
+    texts = []
+    monkeypatch.setattr(alerts, "send_sms", lambda to, body, from_number: texts.append((to, body)))
+
+    first = client.post(path).text
+    client.post(path)
+
+    assert "you've accepted this quote" in first
+    assert database.get_quote(1).accepted_at is not None
+    assert texts == [(OWNER, "Good news: Mrs Jones accepted quote Q1 for £1,250.50. Message Jack to book it in.")]
+
+
+def test_a_changed_or_old_customer_link_doesnt_work(monkeypatch, tmp_path):
+    path = sent_quote(monkeypatch, tmp_path)
+
+    assert client.get(path.replace("/q/1", "/q/2")).status_code == 403
+    assert client.get(path.split("&sig=")[0] + "&sig=made-up").status_code == 403
+
+
+def test_a_draft_has_no_customer_page(monkeypatch, tmp_path):
+    path = sent_quote(monkeypatch, tmp_path, status="draft")
+
+    assert client.get(path).status_code == 403
