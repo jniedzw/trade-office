@@ -1,26 +1,40 @@
 {% extends "base.html" %}
 {% block title %}Admin · Ask Jack{% endblock %}
+{% block body_class %}admin{% endblock %}
 {% block header %}<strong>Ask Jack admin</strong>{% endblock %}
 {% block content %}
-{% if error %}<div class="card late">{{ error }}</div>{% endif %}
-<h2>Clients</h2>
-<div class="card">
-  {% for row in rows %}
-  <div class="job">
-    <a href="/admin/clients/{{ row.client.id }}"><strong>{{ row.client.business_name }}</strong></a>
-    {% if not row.client.active %}<span class="late">· paused</span>{% endif %}
-    <br><span class="muted">{{ row.jobs }} jobs · {{ row.quotes }} quotes · {{ row.invoices }} invoices · AI {{ row.ai_cost }} this month</span>
+{% if error %}<div class="problem">{{ error }}</div>{% endif %}
+
+<h2>Clients ({{ rows|length }})</h2>
+{% for row in rows %}
+<a class="card client-card" href="/admin/clients/{{ row.client.id }}">
+  <div class="row">
+    <strong style="flex: 1;">{{ row.client.business_name }}</strong>
+    <span class="pill {{ 'on' if row.client.active else 'off' }}">{{ "Active" if row.client.active else "Paused" }}</span>
   </div>
-  {% else %}
-  <p class="muted">No clients yet.</p>
-  {% endfor %}
-</div>
+  <div class="stats">
+    <span><strong>{{ row.jobs }}</strong> jobs</span>
+    <span><strong>{{ row.quotes }}</strong> quotes</span>
+    <span><strong>{{ row.invoices }}</strong> invoices</span>
+    <span>AI <strong>{{ row.ai_cost }}</strong> this month</span>
+  </div>
+  <div class="stats">
+    <span>{{ row.client.owner_name or "No name" }} · {{ row.client.owner_mobile }}</span>
+    <span>Twilio {{ row.client.twilio_number }}</span>
+  </div>
+</a>
+{% else %}
+<div class="card"><p class="muted">No clients yet. Add your first below.</p></div>
+{% endfor %}
 
 <h2>Add a client</h2>
 <form method="post" action="/admin/clients" class="card">
-  <label>Business name<br><input name="business_name" required></label><br><br>
-  <label>Their mobile<br><input name="owner_mobile" placeholder="07700 900123" required></label><br><br>
-  <label>Their Twilio number<br><input name="twilio_number" placeholder="+447..." required></label><br><br>
+  <div class="fields two">
+    <div class="field wide"><label>Business name</label><input name="business_name" required></div>
+    <div class="field"><label>Their mobile</label><input name="owner_mobile" placeholder="07700 900123" required></div>
+    <div class="field"><label>Their Twilio number</label><input name="twilio_number" placeholder="+447..." required></div>
+  </div>
+  <p class="muted">Next: fill in their quote and invoice details on their page.</p>
   <button type="submit">Add client</button>
 </form>
 {% endblock %}

@@ -23,9 +23,32 @@
     .time { font-weight: 600; display: inline-block; min-width: 56px; }
     .job a { color: #1a1a1a; }
     .late { color: #b3261e; font-weight: 600; }
+    /* Forms: one field per row on phones, two side by side on wider screens. */
+    .fields { display: grid; gap: 14px; }
+    @media (min-width: 700px) { .fields.two { grid-template-columns: 1fr 1fr; } .wide { grid-column: 1 / -1; } }
+    .field label { display: block; font-size: .85rem; font-weight: 600; margin-bottom: 4px; }
+    .field .hint { font-weight: 400; color: #666; }
+    input[type=text], input:not([type]), textarea { font: inherit; width: 100%; box-sizing: border-box;
+      padding: 10px 12px; border: 1px solid #d6d3cc; border-radius: 10px; background: #fff; }
+    input:focus, textarea:focus { outline: 2px solid #b8975a; border-color: #b8975a; }
+    .row { display: flex; gap: 10px; align-items: center; }
+    .row input { flex: 1; }
+    .row button { width: auto; }
+    .pill { display: inline-block; font-size: .75rem; font-weight: 700; padding: 2px 10px; border-radius: 999px; }
+    .pill.on { background: #e5f4e4; color: #1e6b2a; }
+    .pill.off { background: #fbebeb; color: #b3261e; }
+    .stats { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; font-size: .9rem; color: #666; }
+    .stats strong { color: #1a1a1a; }
+    .notice { background: #e5f4e4; color: #1e6b2a; border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; font-weight: 600; }
+    .problem { background: #fbebeb; color: #b3261e; border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; font-weight: 600; }
+    .danger { border: 1px solid #f0c8c8; }
+    .danger button { background: #b3261e; }
+    .client-card { display: block; text-decoration: none; color: inherit; }
+    .client-card:hover { outline: 2px solid #b8975a; }
+    body.admin main { max-width: 860px; }
   </style>
 </head>
-<body>
+<body class="{% block body_class %}{% endblock %}">
   <header>
     {% block header %}
     <strong>Ask Jack</strong>{% if client %} · {{ client.business_name }}{% endif %}

@@ -222,13 +222,14 @@ def test_no_page_shows_another_clients_data(monkeypatch, tmp_path):
     use_fakes(monkeypatch, tmp_path)
     add_other_client()
     book_today(2, "Their Customer", "Their job")
-    quote_id = database.save_quote(2, "Their Customer", "Their work", "TW", 99900)
+    # An amount that can't turn up anywhere else on the page by chance.
+    quote_id = database.save_quote(2, "Their Customer", "Their work", "TW", 31337)
     database.save_invoice(2, quote_id, "Their Road")
     cookie = log_in(OWNER)
 
     for path in ["/me", "/customers", "/money"]:
         text = client.get(path, headers=as_cookie(cookie)).text
-        assert "Their Customer" not in text and "999" not in text, path
+        assert "Their Customer" not in text and "313.37" not in text, path
     rows = load_workbook(BytesIO(client.get("/download", headers=as_cookie(cookie)).content))
     assert all(sheet.max_row == 1 for sheet in rows if sheet.title != "Prices")
 
