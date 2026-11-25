@@ -1378,3 +1378,22 @@ def test_a_voice_note_that_cant_be_heard(monkeypatch, tmp_path):
     text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "", VOICE)
 
     assert text == whatsapp.VOICE_NOT_YET
+
+
+def test_a_menu_button_opens_its_group(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    sent = use_buttons(monkeypatch)
+    monkeypatch.setattr(settings, "WHATSAPP_JOBS_MENU", "HX_JOBS")
+
+    signed_whatsapp(OWNER, body="Jobs", button="MENU JOBS")
+
+    assert sent == [("HX_JOBS", None)]
+
+
+def test_a_group_title_typed_or_tapped_works_too(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "money")
+
+    # No template set up, so the plain-text version of the Money menu.
+    assert text == "Money:\nOWED: Unpaid invoices, oldest first\nPAID: Record a payment"

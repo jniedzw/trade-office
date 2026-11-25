@@ -1,30 +1,49 @@
-"""The Options menu and the help text, kept in one place.
+"""The menu and the help text, kept in one place.
 
-When a new command works, add it to MENU_CHOICES (or NOT_IN_MENU). A test fails
-until every command is in one of them. After changing MENU_CHOICES, remake the
-menu template: python create_button_templates.py WHATSAPP_MENU
+"morning" shows three buttons (Jobs, Money, More), and each opens its own short menu.
+When a new command works, add it to a group in MENU_GROUPS (or NOT_IN_MENU). A test
+fails until every command is in one of them. After changing a group, remake its
+template: python create_button_templates.py WHATSAPP_JOBS_MENU (or MONEY, MORE)
 """
 
-# Each choice: its title in the list, the command it sends, and a short description.
-# WhatsApp allows 10 choices, with titles up to 24 characters.
-MENU_CHOICES = [
-    ("Log a job", "LOG", "Save a new job or enquiry"),
-    ("New quote", "QUOTE", "Tell Jack about a job"),
-    ("Book a job", "BOOK", "Put a job in your diary"),
-    ("What's on this week", "WEEK", "Your jobs for the next 7 days"),
-    ("Who owes me", "OWED", "Unpaid invoices, oldest first"),
-    ("Job done", "DONE", "Mark a job as finished"),
-    ("Mark as paid", "PAID", "Record a payment"),
-    ("My prices", "PRICES", "See your saved prices"),
-    ("My page", "PAGE", "Your jobs and money on the web"),
-    ("Help", "HELP", "Everything you can send"),
-]
+# Each group: its button title, and its choices as (title, command, description).
+# A group with more than 3 choices becomes a list, since WhatsApp allows 3 buttons.
+MENU_GROUPS = {
+    "JOBS": ("Jobs", [
+        ("Log a job", "LOG", "Save a new job or enquiry"),
+        ("New quote", "QUOTE", "Tell Jack about a job"),
+        ("Book a job", "BOOK", "Put a job in your diary"),
+        ("What's on this week", "WEEK", "Your jobs for the next 7 days"),
+        ("Job done", "DONE", "Mark a job as finished"),
+    ]),
+    "MONEY": ("Money", [
+        ("Who owes me", "OWED", "Unpaid invoices, oldest first"),
+        ("Mark as paid", "PAID", "Record a payment"),
+    ]),
+    "MORE": ("More", [
+        ("My prices", "PRICES", "See your saved prices"),
+        ("My page", "PAGE", "Your jobs and money on the web"),
+        ("Help", "HELP", "Everything you can send"),
+    ]),
+}
+
+# Every choice in every group, in one list.
+MENU_CHOICES = [choice for title, choices in MENU_GROUPS.values() for choice in choices]
 
 # Commands reached another way: by buttons, or typed with a quote number.
-NOT_IN_MENU = ["FINAL", "CHANGE", "INVOICE", "PRICE", "MARKUP", "ALERTS", "EXPORT", "MOVE", "CANCEL", "UNDO", "SEND", "REMIND"]
+NOT_IN_MENU = [
+    "FINAL", "CHANGE", "INVOICE", "PRICE", "MARKUP", "ALERTS", "EXPORT",
+    "MOVE", "CANCEL", "UNDO", "SEND", "REMIND", "MENU",
+]
 
 # What Jack says to anything he doesn't recognise, like "morning".
-MENU_TEXT = "Hi, it's Jack. What do you need? Tap Options."
+MENU_TEXT = "Hi, it's Jack. What do you need?"
+
+
+def group_text(group):
+    """Return a group's menu as plain text, for when its template isn't set up."""
+    title, choices = MENU_GROUPS[group]
+    return f"{title}:\n" + "\n".join(f"{command}: {description}" for _, command, description in choices)
 
 HELP_TEXT = (
     "Things you can send me:\n"
@@ -53,8 +72,11 @@ HELP_TEXT = (
 
 
 def command_for_title(text):
-    """Return the command for a menu choice's title, like "New quote", or None."""
+    """Return the command for a menu button's title, like "New quote" or "Jobs", or None."""
     for title, command, _ in MENU_CHOICES:
         if text.strip().upper() == title.upper():
             return command
+    for group, (title, _) in MENU_GROUPS.items():
+        if text.strip().upper() == title.upper():
+            return f"MENU {group}"
     return None

@@ -34,3 +34,7 @@ WHATSAPP_WEEKLY_TEMPLATE = os.environ.get("WHATSAPP_WEEKLY_TEMPLATE")
 WHATSAPP_OWED_BUTTONS = os.environ.get("WHATSAPP_OWED_BUTTONS")
 # Optional: lets Jack understand voice notes. Without it, he asks for them to be typed.
 ASSEMBLYAI_API_KEY = os.environ.get("ASSEMBLYAI_API_KEY")
+# Optional: the menu's three groups, from create_button_templates.py.
+WHATSAPP_JOBS_MENU = os.environ.get("WHATSAPP_JOBS_MENU")
+WHATSAPP_MONEY_MENU = os.environ.get("WHATSAPP_MONEY_MENU")
+WHATSAPP_MORE_MENU = os.environ.get("WHATSAPP_MORE_MENU")

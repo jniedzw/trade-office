@@ -57,7 +57,7 @@ from database import (
     update_quote,
 )
 from diary import uk_now, week_ahead, when
-from menu import HELP_TEXT, MENU_TEXT, command_for_title
+from menu import HELP_TEXT, MENU_GROUPS, MENU_TEXT, command_for_title, group_text
 from quotes import (
     CUSTOMER_LINK_DAYS,
     QUOTE_HELP,
@@ -96,10 +96,29 @@ def buttons_for(template, number):
 
 
 def menu_reply(client):
-    """Return the menu, or plain help if the menu template isn't set up."""
+    """Return the main menu (Jobs, Money, More), or plain help if its template isn't set up."""
     if not settings.WHATSAPP_MENU:
         return Reply(HELP_TEXT)
     return Reply(MENU_TEXT, None, (settings.WHATSAPP_MENU, {}))
+
+
+# Each group's template, by the group's name in menu.py.
+GROUP_TEMPLATES = {
+    "JOBS": lambda: settings.WHATSAPP_JOBS_MENU,
+    "MONEY": lambda: settings.WHATSAPP_MONEY_MENU,
+    "MORE": lambda: settings.WHATSAPP_MORE_MENU,
+}
+
+
+def group_reply(client, details):
+    """Open one of the menu's groups, like Jobs, or the main menu if none is named."""
+    group = details.strip().upper()
+    if group not in MENU_GROUPS:
+        return menu_reply(client)
+    template = GROUP_TEMPLATES[group]()
+    if not template:
+        return Reply(group_text(group))
+    return Reply(f"{MENU_GROUPS[group][0]}: what would you like?", None, (template, {}))
 
 
 def quote_reply(client, details):
@@ -286,6 +305,8 @@ def is_new_command(command):
     """
     words = command.split()
     if command in ("ALERTS ON", "ALERTS OFF", "PRICES", "HELP", "OWED", "PAID", "WEEK", "EXPORT", "PAGE", "DONE", "UNDO", "REMIND"):
+        return True
+    if words[:1] == ["MENU"]:
         return True
     if words[:1] in (["QUOTE"], ["LOG"], ["BOOK"]):
         return True
@@ -832,6 +853,7 @@ COMMANDS = {
     "UNDO": lambda client, rest: undo_reply(client),
     "SEND": lambda client, rest: send_reply(client, rest),
     "REMIND": lambda client, rest: remind_reply(client, rest),
+    "MENU": lambda client, rest: group_reply(client, rest),
 }
 
 
