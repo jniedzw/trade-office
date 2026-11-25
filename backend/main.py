@@ -14,12 +14,10 @@ from database import (
     create_tables,
     delete_old_calls,
     everything_for,
-    get_business_details,
     get_client,
     get_client_by_number,
     get_invoice,
     get_quote,
-    get_quote_lines,
     get_recent_calls,
     is_opted_out,
     is_skipped,
@@ -34,7 +32,6 @@ from database import (
     whatsapp_alerts_on,
 )
 from export import XLSX, make_export
-from pdfs import make_invoice_pdf, make_quote_pdf
 from quotes import link_is_valid
 from reviews import send_review_requests
 from sms import count_old_twilio_records, send_whatsapp_alert
@@ -303,10 +300,7 @@ def quote_pdf(quote_id: int, expires: int = 0, sig: str = ""):
     quote = get_quote(quote_id)
     if quote is None:
         raise HTTPException(status_code=404, detail="Quote not found")
-    business_name = get_client(quote.client_id).business_name
-    details = get_business_details(quote.client_id)
-    pdf = make_quote_pdf(quote, business_name, get_quote_lines(quote_id), details)
-    return Response(content=pdf, media_type="application/pdf")
+    return Response(content=web.quote_pdf_for(quote), media_type="application/pdf")
 
 
 @app.get("/invoices/{invoice_id}.pdf")
@@ -317,12 +311,7 @@ def invoice_pdf(invoice_id: int, expires: int = 0, sig: str = ""):
     invoice = get_invoice(invoice_id)
     if invoice is None:
         raise HTTPException(status_code=404, detail="Invoice not found")
-    quote = get_quote(invoice.quote_id)
-    business_name = get_client(invoice.client_id).business_name
-    details = get_business_details(invoice.client_id)
-    lines = get_quote_lines(quote.id)
-    pdf = make_invoice_pdf(invoice, quote, business_name, lines, details)
-    return Response(content=pdf, media_type="application/pdf")
+    return Response(content=web.invoice_pdf_for(invoice), media_type="application/pdf")
 
 
 @app.get("/exports/{client_id}.xlsx")

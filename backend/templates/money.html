@@ -23,7 +23,7 @@
 <div class="card">
   {% for invoice, quote in invoices %}
   <div class="job money-line">
-    <span>{{ invoice_label(invoice.number) }}: {{ quote.customer_name }}, {{ money(quote.total_pence) }}</span>
+    <span><a class="name" href="/my/invoices/{{ invoice.id }}.pdf">{{ invoice_label(invoice.number) }}</a>: {{ quote.customer_name }}, {{ money(quote.total_pence) }}</span>
     {% if invoice.paid_at %}<span class="tag done">Paid {{ day_name(invoice.paid_at) }}</span>{% else %}<span class="tag">Unpaid</span>{% endif %}
   </div>
   {% else %}

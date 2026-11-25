@@ -54,11 +54,11 @@
   {% endfor %}
 </div>
 
-<h2>Quotes</h2>
+<h2>Quotes <span class="hint muted" style="font-weight:400">· tap one to open it</span></h2>
 <div class="card">
   {% for quote in customer.quote_list %}
   <div class="job money-line">
-    <span>{{ quote.title }}<br><span class="muted">
+    <span><a class="name" href="/my/quotes/{{ quote.id }}.pdf">{{ quote.title }}</a><br><span class="muted">
       {% if quote.accepted_at %}Accepted {{ day_name(quote.accepted_at) }}{% elif quote.sent_at %}Sent {{ day_name(quote.sent_at) }}, no answer yet{% else %}{{ quote.status | capitalize }}, not sent{% endif %}</span></span>
     <span><strong>{{ money(quote.total_pence) }}</strong> <span class="tag">{{ quote_label(quote.number) }}</span></span>
   </div>
@@ -71,7 +71,7 @@
 <div class="card">
   {% for invoice, quote in customer.invoice_list %}
   <div class="job money-line">
-    <span>{{ invoice_label(invoice.number) }}: {{ money(quote.total_pence) }}</span>
+    <span><a class="name" href="/my/invoices/{{ invoice.id }}.pdf">{{ invoice_label(invoice.number) }}</a>: {{ money(quote.total_pence) }}</span>
     {% if invoice.paid_at %}<span class="tag done">Paid {{ day_name(invoice.paid_at) }}</span>{% else %}<span class="tag late">Unpaid</span>{% endif %}
   </div>
   {% else %}

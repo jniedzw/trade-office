@@ -18,6 +18,7 @@ from database import (
     client_for_session,
     customers_for,
     get_customer,
+    get_invoice,
     save_customer_details,
     save_customer_notes,
     end_web_session,
@@ -30,6 +31,7 @@ from database import (
 )
 from diary import day_name, to_uk, uk_now, week_days
 from export import XLSX, make_export
+from pdfs import make_invoice_pdf, make_quote_pdf
 from quotes import invoice_label, link_is_valid, money, quote_label, signed_link
 
 router = APIRouter()
@@ -269,6 +271,54 @@ def money_page(request: Request):
         paid_this_month=money(paid), money=money, invoice_label=invoice_label,
         day_name=lambda moment: day_name(to_uk(moment)),
     )
+
+
+def quote_pdf_for(quote):
+    """Return a quote's PDF, made the same way wherever it's opened from."""
+    business_name = get_client(quote.client_id).business_name
+    details = get_business_details(quote.client_id)
+    return make_quote_pdf(quote, business_name, get_quote_lines(quote.id), details)
+
+
+def invoice_pdf_for(invoice):
+    """Return an invoice's PDF, made the same way wherever it's opened from."""
+    quote = get_quote(invoice.quote_id)
+    business_name = get_client(invoice.client_id).business_name
+    details = get_business_details(invoice.client_id)
+    return make_invoice_pdf(invoice, quote, business_name, get_quote_lines(quote.id), details)
+
+
+def pdf_response(pdf, filename):
+    """Return a PDF that opens in the browser, with a sensible name if it's saved."""
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="{filename}"'})
+
+
+@router.get("/my/quotes/{quote_id}.pdf")
+def my_quote_pdf(request: Request, quote_id: int):
+    """A quote's PDF for the logged-in tradesperson. No signed link needed: the login is the check."""
+    client = logged_in_client(request)
+    if client is None:
+        return logged_out(request)
+    quote = get_quote(quote_id)
+    # Someone else's quote gets the same answer as one that doesn't exist.
+    if quote is None or quote.client_id != client.id:
+        return page(request, "message.html", status_code=404, client=client,
+                    heading="Quote not found", text="It may have been removed.")
+    return pdf_response(quote_pdf_for(quote), f"{quote_label(quote.number)}.pdf")
+
+
+@router.get("/my/invoices/{invoice_id}.pdf")
+def my_invoice_pdf(request: Request, invoice_id: int):
+    """An invoice's PDF for the logged-in tradesperson."""
+    client = logged_in_client(request)
+    if client is None:
+        return logged_out(request)
+    invoice = get_invoice(invoice_id)
+    if invoice is None or invoice.client_id != client.id:
+        return page(request, "message.html", status_code=404, client=client,
+                    heading="Invoice not found", text="It may have been removed.")
+    return pdf_response(invoice_pdf_for(invoice), f"{invoice_label(invoice.number)}.pdf")
 
 
 @router.get("/download")

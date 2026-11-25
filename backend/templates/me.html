@@ -36,7 +36,7 @@
 <div class="card">
   {% for quote in waiting %}
   <div class="job money-line">
-    <span><strong>{{ quote.customer_name }}</strong>: {{ quote.title }}<br><span class="muted">Sent {{ sent_day(quote.sent_at) }}</span></span>
+    <span><strong>{{ quote.customer_name }}</strong>: <a class="name" href="/my/quotes/{{ quote.id }}.pdf">{{ quote.title }}</a><br><span class="muted">Sent {{ sent_day(quote.sent_at) }}</span></span>
     <span><strong>{{ money(quote.total_pence) }}</strong> <span class="tag">{{ quote_label(quote.number) }}</span></span>
   </div>
   {% endfor %}

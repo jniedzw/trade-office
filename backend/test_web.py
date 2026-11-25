@@ -188,7 +188,7 @@ def test_today_shows_a_summary_and_quotes_waiting(monkeypatch, tmp_path):
     assert " Dave</strong>" in text
     assert '<span class="big">1</span><span class="small">job today' in text
     assert "Quotes waiting for an answer" in text
-    assert "Mr Smith</strong>: Boiler service" in text and "£85.00" in text
+    assert f'Mr Smith</strong>: <a class="name" href="/my/quotes/{sent}.pdf">Boiler service' in text
     # Accepted quotes aren't waiting any more.
     assert "Ms Brown" not in text
     assert '<a href="/me" class="here">Today</a>' in text
@@ -313,6 +313,33 @@ def test_nobody_can_open_or_change_another_clients_customer(monkeypatch, tmp_pat
     assert database.customers_for(2)[0]["phone"] == "+447700900222"
 
 
+def test_a_logged_in_owner_can_open_their_quote_and_invoice_pdfs(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    database.save_business_details(1, legal_name="Test", address="1 Test Street", ref_letters="TP", bank_details="Bank")
+    quote_id = database.save_quote(1, "Mrs Jones", "Radiator", "RAD", 45000)
+    invoice_id = database.save_invoice(1, quote_id, "12 Test Road").id
+    cookie = as_cookie(log_in())
+
+    for path in [f"/my/quotes/{quote_id}.pdf", f"/my/invoices/{invoice_id}.pdf"]:
+        response = client.get(path, headers=cookie)
+        assert response.status_code == 200, path
+        assert response.content.startswith(b"%PDF"), path
+
+
+def test_nobody_can_open_another_clients_pdfs(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    add_other_client()
+    database.save_business_details(2, legal_name="Them", address="2 Test Street", ref_letters="TH", bank_details="Bank")
+    quote_id = database.save_quote(2, "Their Customer", "Their work", "TW", 31337)
+    invoice_id = database.save_invoice(2, quote_id, "Their Road").id
+    cookie = as_cookie(log_in(OWNER))
+
+    for path in [f"/my/quotes/{quote_id}.pdf", f"/my/invoices/{invoice_id}.pdf"]:
+        response = client.get(path, headers=cookie)
+        assert response.status_code == 404 and not response.content.startswith(b"%PDF"), path
+        assert client.get(path).status_code == 401, path
+
+
 def test_money_page(monkeypatch, tmp_path):
     use_fakes(monkeypatch, tmp_path)
     for name, pence in [("Mrs Jones", 125050), ("Mr Smith", 8500)]:
@@ -324,7 +351,7 @@ def test_money_page(monkeypatch, tmp_path):
 
     assert '<span class="big">£1,250.50</span><span class="small">owed to you' in text
     assert '<span class="big">£85.00</span><span class="small">paid this month' in text
-    assert "INV-0002: Mr Smith, £85.00" in text
+    assert 'INV-0002</a>: Mr Smith, £85.00' in text
 
 
 def test_download_gives_a_spreadsheet_file(monkeypatch, tmp_path):
