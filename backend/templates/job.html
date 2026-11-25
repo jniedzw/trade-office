@@ -4,7 +4,7 @@
     <span>{% if at %}<span class="time">{{ at }}</span>{% endif %}<strong>{{ job.customer_name }}</strong>: {{ job.work }}</span>
     <span>
       {% if job.done_at %}<span class="tag done">Done</span>{% endif %}
-      {% if job.number %}<span class="tag">J{{ job.number }}</span>{% endif %}
+      {% if job.number %}<a class="tag" href="/jobs/{{ job.number }}">J{{ job.number }}</a>{% endif %}
     </span>
   </div>
   {% if job.address %}<div class="where">{{ job.address | replace('\n', ', ') }}</div>{% endif %}

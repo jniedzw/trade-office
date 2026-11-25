@@ -81,6 +81,14 @@
     .actions form { flex: 1; margin: 0; }
     .actions button { padding: 9px; font-size: .9rem; }
     form.inline { display: inline; margin: 0; }
+    .filters { display: flex; gap: 8px; margin: 8px 0 12px; }
+    .filters a { padding: 6px 14px; border-radius: 999px; border: 1px solid #cbd5e1; text-decoration: none;
+                 color: var(--ink); font-weight: 600; font-size: .9rem; background: #fff; }
+    .filters a.here { background: var(--ink); color: #fff; border-color: var(--ink); }
+    a.tag { text-decoration: none; color: inherit; }
+    a.job-row { display: block; text-decoration: none; color: inherit; }
+    input[type=date], input[type=time] { font: inherit; width: 100%; box-sizing: border-box; padding: 10px 12px;
+      border: 1px solid #cbd5e1; border-radius: 10px; background: #fff; }
     a.name { color: var(--brand-text); text-decoration: none; font-weight: 600; }
     .tip { font-size: .85rem; color: var(--muted); text-align: center; margin: 24px 0 8px; }
     input[type=search] { font: inherit; width: 100%; box-sizing: border-box; padding: 10px 12px;
@@ -94,6 +102,7 @@
     {% if client %}
     <nav>
       <a href="/me"{% if tab == "today" %} class="here"{% endif %}>Today</a>
+      <a href="/jobs"{% if tab == "jobs" %} class="here"{% endif %}>Jobs</a>
       <a href="/customers"{% if tab == "customers" %} class="here"{% endif %}>Customers</a>
       <a href="/money"{% if tab == "money" %} class="here"{% endif %}>Money</a>
     </nav>
@@ -104,7 +113,7 @@
     {% if flash %}
     <div class="notice money-line">
       <span>{{ flash }}</span>
-      {% if request.query_params.get("did") in ("done", "paid") %}
+      {% if request.query_params.get("did") in ("done", "paid", "cancelled", "saved") %}
       <form method="post" action="/undo"><input type="hidden" name="back" value="{{ request.url.path }}">
         <button class="small light" type="submit">Undo</button></form>
       {% endif %}

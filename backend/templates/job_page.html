@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}J{{ job.number }} · {{ client.business_name }}{% endblock %}
+{% block content %}
+<p><a href="/jobs" class="muted">← All jobs</a></p>
+<p class="hello"><strong>{{ job.customer_name }}</strong> <span class="tag">J{{ job.number }}</span>
+  <span class="tag{% if job.status in ('done', 'invoiced', 'paid') %} done{% elif job.status == 'cancelled' %} late{% endif %}">{{ job.status | capitalize }}</span></p>
+<p class="muted">{% if job.starts_at %}{{ when(job.starts_at, job.ends_on) }}{% else %}Not booked yet{% endif %}</p>
+
+{% if problem == "phone" %}<div class="problem">That doesn't look like a UK phone number, like 07700 900123. Nothing was changed.</div>{% endif %}
+{% if problem == "date" %}<div class="problem">That date doesn't work: the last day can't be before the first. Nothing was changed.</div>{% endif %}
+{% if problem == "work" %}<div class="problem">Say what the job is. Nothing was changed.</div>{% endif %}
+
+{% if job.customer_phone or job.address %}
+<div class="actions" style="margin-bottom:16px">
+  {% if job.customer_phone %}<a href="tel:{{ job.customer_phone }}">Call</a>{% endif %}
+  {% if job.address %}<a href="https://www.google.com/maps/search/?api=1&query={{ job.address | replace('\n', ', ') | urlencode }}">Directions</a>{% endif %}
+</div>
+{% endif %}
+
+<h2>Details</h2>
+<form class="card" method="post" action="/jobs/{{ job.number }}/edit">
+  <div class="fields two">
+    <div class="field wide">
+      <label for="work">The job</label>
+      <input id="work" name="work" type="text" value="{{ job.work }}" required>
+    </div>
+    <div class="field">
+      <label for="phone">Phone</label>
+      <input id="phone" name="phone" type="text" inputmode="tel" autocomplete="off" value="{{ job.customer_phone or '' }}">
+    </div>
+    <div class="field">
+      <label for="address">Address <span class="hint">(one line each)</span></label>
+      <textarea id="address" name="address" rows="3">{{ job.address or '' }}</textarea>
+    </div>
+    <div class="field">
+      <label for="day">Booked for <span class="hint">(leave blank if not booked)</span></label>
+      <input id="day" name="day" type="date" value="{{ booked_day }}">
+    </div>
+    <div class="field">
+      <label for="at">Time <span class="hint">(optional)</span></label>
+      <input id="at" name="at" type="time" value="{{ booked_time }}">
+    </div>
+    <div class="field">
+      <label for="last_day">Last day <span class="hint">(if it runs over days)</span></label>
+      <input id="last_day" name="last_day" type="date" value="{{ job.ends_on.isoformat() if job.ends_on else '' }}">
+    </div>
+  </div>
+  <p class="muted" style="font-size:.8rem">To change the customer's name, message Jack on WhatsApp.</p>
+  <button type="submit">Save changes</button>
+</form>
+
+{% if quotes %}
+<h2>Quotes</h2>
+<div class="card">
+  {% for quote in quotes %}
+  <div class="job money-line">
+    <span><a class="name" href="/my/quotes/{{ quote.id }}.pdf">{{ quote.title }}</a></span>
+    <span><strong>{{ money(quote.total_pence) }}</strong> <span class="tag">{{ quote_label(quote.number) }}</span></span>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if job.status in ("logged", "quoted", "booked") %}
+<h2>Finished or off?</h2>
+<div class="card actions" style="margin-top:0">
+  <form method="post" action="/jobs/{{ job.number }}/done"><input type="hidden" name="back" value="/jobs/{{ job.number }}">
+    <button type="submit">Job done</button></form>
+  <form method="post" action="/jobs/{{ job.number }}/cancel">
+    <button class="light" type="submit">Cancel job</button></form>
+</div>
+{% endif %}
+
+{% if can_delete %}
+<div class="card danger">
+  <p style="margin-top:0"><strong>Delete this job</strong><br><span class="muted">For mistakes and test jobs. It's gone for good, and UNDO can't bring it back.</span></p>
+  <form method="post" action="/jobs/{{ job.number }}/delete"
+        onsubmit="return confirm('Delete J{{ job.number }} for good? This can\'t be undone.')">
+    <input type="hidden" name="confirm" value="yes">
+    <button type="submit">Delete job</button>
+  </form>
+</div>
+{% else %}
+<p class="muted" style="font-size:.8rem">This job has a quote, so it's kept as a business record. You can cancel it instead.</p>
+{% endif %}
+{% endblock %}

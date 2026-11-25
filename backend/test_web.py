@@ -396,6 +396,137 @@ def test_nobody_can_finish_or_mark_paid_another_clients_work(monkeypatch, tmp_pa
     assert len(database.unpaid_invoices(2)) == 1
 
 
+def test_jobs_tab_splits_open_done_and_cancelled(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    database.save_job(1, "Mrs Jones", "Open job")
+    database.mark_job_done(database.save_job(1, "Mr Smith", "Done job"))
+    database.cancel_job(database.save_job(1, "Ms Brown", "Cancelled job"))
+    cookie = as_cookie(log_in())
+
+    open_jobs = client.get("/jobs", headers=cookie).text
+    done = client.get("/jobs?show=done", headers=cookie).text
+    cancelled = client.get("/jobs?show=cancelled", headers=cookie).text
+
+    assert "Open job" in open_jobs and "Done job" not in open_jobs and 'href="/jobs/1"' in open_jobs
+    assert "Done job" in done and "Open job" not in done
+    assert "Cancelled job" in cancelled and "Open job" not in cancelled
+
+
+def edit(number, cookie, **fields):
+    """Post the job page's form, with sensible values for anything not given."""
+    data = {"work": "Leaking radiator", "phone": "", "address": "", "day": "", "at": "", "last_day": ""} | fields
+    return client.post(f"/jobs/{number}/edit", data=data, headers=cookie, follow_redirects=False)
+
+
+def test_editing_a_job_saves_its_details_and_booking(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    job_id = database.save_job(1, "Mrs Jones", "Radiator")
+    cookie = as_cookie(log_in())
+
+    response = edit(1, cookie, work="New radiator", phone="07700 900123", address="12 Test Road\nLiverpool",
+                    day="2026-12-03", at="09:30")
+
+    job = database.get_job(job_id)
+    assert response.headers["location"] == "/jobs/1?did=saved&n=1"
+    assert (job.work, job.customer_phone, job.address) == ("New radiator", "+447700900123", "12 Test Road\nLiverpool")
+    assert job.status == "booked" and diary.to_uk(job.starts_at).strftime("%Y-%m-%d %H:%M") == "2026-12-03 09:30"
+    page = client.get("/jobs/1", headers=cookie).text
+    assert 'value="2026-12-03"' in page and 'value="09:30"' in page
+
+
+def test_a_blank_date_takes_a_job_out_of_the_diary(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    job_id = book_today(1, "Mrs Jones", "Leaking radiator")
+
+    edit(1, as_cookie(log_in()))
+
+    job = database.get_job(job_id)
+    assert job.starts_at is None and job.status == "logged"
+
+
+def test_undo_puts_back_an_edited_job(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    job_id = book_today(1, "Mrs Jones", "Leaking radiator", phone="+447700900111")
+    cookie = as_cookie(log_in())
+
+    edit(1, cookie, work="Something else", phone="07700900999")
+    client.post("/undo", data={"back": "/jobs/1"}, headers=cookie, follow_redirects=False)
+
+    job = database.get_job(job_id)
+    assert (job.work, job.customer_phone, job.status) == ("Leaking radiator", "+447700900111", "booked")
+
+
+def test_bad_job_edits_change_nothing(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    job_id = database.save_job(1, "Mrs Jones", "Radiator")
+    cookie = as_cookie(log_in())
+
+    for fields, problem in [({"work": " "}, "work"), ({"phone": "123"}, "phone"),
+                            ({"day": "2026-12-03", "last_day": "2026-12-01"}, "date"), ({"day": "soon"}, "date")]:
+        response = edit(1, cookie, **fields)
+        assert response.headers["location"] == f"/jobs/1?problem={problem}", fields
+    assert database.get_job(job_id).work == "Radiator"
+
+
+def test_cancel_button_cancels_and_undo_brings_it_back(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    job_id = book_today(1, "Mrs Jones", "Leaking radiator")
+    cookie = as_cookie(log_in())
+
+    response = client.post("/jobs/1/cancel", headers=cookie, follow_redirects=False)
+
+    assert database.get_job(job_id).status == "cancelled"
+    assert "J1 cancelled." in client.get(response.headers["location"], headers=cookie).text
+    client.post("/undo", data={"back": "/jobs/1"}, headers=cookie, follow_redirects=False)
+    assert database.get_job(job_id).status == "booked"
+
+
+def test_a_job_with_no_quote_can_be_deleted(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    job_id = database.save_job(1, "Mrs Jones", "Test job")
+    cookie = as_cookie(log_in())
+    # An earlier change to it, so UNDO afterwards has a deleted job to cope with.
+    whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "CANCEL J1")
+
+    client.post("/jobs/1/delete", headers=cookie, follow_redirects=False)
+    assert database.get_job(job_id) is not None, "needs the confirm"
+    response = client.post("/jobs/1/delete", data={"confirm": "yes"}, headers=cookie, follow_redirects=False)
+
+    assert database.get_job(job_id) is None
+    assert response.headers["location"] == "/jobs?did=deleted&n=1"
+    client.post("/undo", headers=cookie, follow_redirects=False)
+    assert client.get("/jobs/1", headers=cookie).status_code == 404
+
+
+def test_a_job_with_a_quote_cant_be_deleted(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    job_id = database.save_job(1, "Mrs Jones", "Radiator")
+    database.save_quote(1, "Mrs Jones", "Radiator", "RAD", 45000, job_id=job_id)
+    cookie = as_cookie(log_in())
+
+    page = client.get("/jobs/1", headers=cookie).text
+    client.post("/jobs/1/delete", data={"confirm": "yes"}, headers=cookie, follow_redirects=False)
+
+    assert 'action="/jobs/1/delete"' not in page
+    assert database.get_job(job_id) is not None
+
+
+def test_nobody_can_see_or_change_another_clients_jobs(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    add_other_client()
+    job_id = book_today(2, "Their Customer", "Their job")
+    cookie = as_cookie(log_in(OWNER))
+
+    assert client.get("/jobs/1", headers=cookie).status_code == 404
+    assert "Their Customer" not in client.get("/jobs", headers=cookie).text
+    edit(1, cookie, work="hacked")
+    client.post("/jobs/1/cancel", headers=cookie, follow_redirects=False)
+    client.post("/jobs/1/delete", data={"confirm": "yes"}, headers=cookie, follow_redirects=False)
+
+    job = database.get_job(job_id)
+    assert (job.work, job.status) == ("Their job", "booked")
+
+
 def test_money_page(monkeypatch, tmp_path):
     use_fakes(monkeypatch, tmp_path)
     for name, pence in [("Mrs Jones", 125050), ("Mr Smith", 8500)]:
@@ -428,7 +559,7 @@ def test_no_page_shows_another_clients_data(monkeypatch, tmp_path):
     database.save_invoice(2, quote_id, "Their Road")
     cookie = log_in(OWNER)
 
-    for path in ["/me", "/customers", "/money"]:
+    for path in ["/me", "/jobs", "/jobs?show=done", "/customers", "/money"]:
         text = client.get(path, headers=as_cookie(cookie)).text
         assert "Their Customer" not in text and "313.37" not in text, path
     rows = load_workbook(BytesIO(client.get("/download", headers=as_cookie(cookie)).content))
@@ -438,9 +569,10 @@ def test_no_page_shows_another_clients_data(monkeypatch, tmp_path):
 def test_every_page_needs_logging_in(monkeypatch, tmp_path):
     use_fakes(monkeypatch, tmp_path)
 
-    for path in ["/me", "/customers", "/customers/1", "/money", "/download"]:
+    for path in ["/me", "/jobs", "/jobs/1", "/customers", "/customers/1", "/money", "/download"]:
         assert client.get(path).status_code == 401, path
-    for path in ["/customers/1/notes", "/customers/1/details", "/jobs/1/done", "/invoices/1/paid", "/undo"]:
+    for path in ["/customers/1/notes", "/customers/1/details", "/jobs/1/done", "/invoices/1/paid", "/undo",
+                 "/jobs/1/edit", "/jobs/1/cancel", "/jobs/1/delete"]:
         assert client.post(path).status_code == 401, path
 
 

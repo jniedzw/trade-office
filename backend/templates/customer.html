@@ -45,7 +45,7 @@
 <div class="card">
   {% for job in customer.job_list %}
   <div class="job money-line">
-    <span>{{ job.work }}{% if job.starts_at %}<br><span class="muted">Booked {{ day_name(job.starts_at) }}</span>{% endif %}</span>
+    <span><a class="name" href="/jobs/{{ job.number }}">{{ job.work }}</a>{% if job.starts_at %}<br><span class="muted">Booked {{ day_name(job.starts_at) }}</span>{% endif %}</span>
     <span><span class="tag{% if job.status in ('done', 'invoiced', 'paid') %} done{% endif %}">{{ job.status | capitalize }}</span>
       {% if job.number %}<span class="tag">J{{ job.number }}</span>{% endif %}
       {% if not job.done_at and job.status in ("logged", "quoted", "booked") %}

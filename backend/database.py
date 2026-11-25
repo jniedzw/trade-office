@@ -1025,6 +1025,9 @@ def undo_last_change(client_id):
             return None
         for state in json.loads(step.before):
             row = session.get(UNDOABLE[state["table"]], state["id"])
+            if row is None:
+                # Deleted since, so there's nothing to put back.
+                continue
             for field, value in state["fields"].items():
                 setattr(row, field, from_json_value(value))
             session.add(row)
@@ -1109,6 +1112,43 @@ def mark_review_asked(job_id):
         job.review_asked_at = now_utc()
         session.add(job)
         session.commit()
+
+
+def update_job(job_id, work, customer_phone, address, starts_at, ends_on):
+    """Save a job's details as edited on the web page.
+
+    starts_at None takes it out of the diary: it goes back to logged, or quoted if it has a quote.
+    """
+    with Session(engine) as session:
+        job = session.get(Job, job_id)
+        job.work, job.customer_phone, job.address = work, customer_phone, address
+        if starts_at is not None:
+            job.starts_at, job.ends_on = starts_at.astimezone(timezone.utc), ends_on
+            if job.status in ("logged", "quoted"):
+                job.status = "booked"
+        elif job.starts_at is not None:
+            job.starts_at = job.ends_on = None
+            if job.status == "booked":
+                has_quote = session.exec(select(Quote).where(Quote.job_id == job_id)).first()
+                job.status = "quoted" if has_quote else "logged"
+        session.add(job)
+        session.commit()
+
+
+def can_delete_job(job_id):
+    """Return True if a job has no quotes, so deleting it loses no business records."""
+    return not quotes_for_job(job_id)
+
+
+def delete_job(client_id, job_id):
+    """Delete this client's job for good, if it has no quotes. Return True if it went."""
+    with Session(engine) as session:
+        job = session.get(Job, job_id)
+        if job is None or job.client_id != client_id or not can_delete_job(job_id):
+            return False
+        session.delete(job)
+        session.commit()
+        return True
 
 
 def quotes_for_job(job_id):

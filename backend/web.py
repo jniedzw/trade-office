@@ -1,6 +1,7 @@
 """The tradesperson's own web pages, logged into from a one-time WhatsApp link."""
 
 import re
+from datetime import date, time
 from pathlib import Path
 
 from fastapi import APIRouter, Form, Request, Response
@@ -23,6 +24,10 @@ from database import (
     customers_for,
     get_customer,
     get_job_by_number,
+    can_delete_job,
+    delete_job,
+    quotes_for_job,
+    update_job,
     get_invoice,
     save_customer_details,
     save_customer_notes,
@@ -34,7 +39,7 @@ from database import (
     unpaid_invoices,
     use_login_link,
 )
-from diary import day_name, to_uk, uk_now, week_days
+from diary import NO_TIME, day_name, start_time, to_uk, uk_now, week_days, when
 from export import XLSX, make_export
 from pdfs import make_invoice_pdf, make_quote_pdf
 from sms import send_template
@@ -65,6 +70,9 @@ def flash_for(request):
     return {
         "done": f"{job_label(number)} marked done.",
         "paid": f"{invoice_label(number)} marked as paid.",
+        "cancelled": f"{job_label(number)} cancelled.",
+        "saved": f"{job_label(number)} saved.",
+        "deleted": f"{job_label(number)} deleted.",
         "undone": "Undone.",
         "nothing": "There was nothing to undo.",
     }.get(did)
@@ -312,6 +320,116 @@ def money_page(request: Request):
     )
 
 
+# How the Jobs tab splits jobs up, by their status.
+JOB_GROUPS = {
+    "open": ("Open", ("logged", "quoted", "booked")),
+    "done": ("Done", ("done", "invoiced", "paid")),
+    "cancelled": ("Cancelled", ("cancelled",)),
+}
+
+
+@router.get("/jobs", response_class=HTMLResponse)
+def jobs_page(request: Request, show: str = "open"):
+    """Every job, newest first: open ones, finished ones, or cancelled ones."""
+    client = logged_in_client(request)
+    if client is None:
+        return logged_out(request)
+    show = show if show in JOB_GROUPS else "open"
+    jobs = [job for job in reversed(everything_for(client.id)["jobs"]) if job.status in JOB_GROUPS[show][1]]
+    return page(
+        request, "jobs.html", client=client, tab="jobs", jobs=jobs, show=show, groups=JOB_GROUPS,
+        when=when, day_name=lambda moment: day_name(to_uk(moment)),
+    )
+
+
+@router.get("/jobs/{number}", response_class=HTMLResponse)
+def job_page(request: Request, number: int, problem: str = ""):
+    """One job: its details to edit, its quotes, and buttons to finish, cancel or delete it."""
+    client = logged_in_client(request)
+    if client is None:
+        return logged_out(request)
+    job = get_job_by_number(client.id, number)
+    if job is None:
+        return page(request, "message.html", status_code=404, client=client,
+                    heading="Job not found", text="It may have been deleted.")
+    start = to_uk(job.starts_at) if job.starts_at else None
+    return page(
+        request, "job_page.html", client=client, tab="jobs", job=job, problem=problem,
+        quotes=quotes_for_job(job.id), can_delete=can_delete_job(job.id),
+        booked_day=start.date().isoformat() if start else "",
+        booked_time=start.strftime("%H:%M") if start and start.time() != NO_TIME else "",
+        when=when, money=money, quote_label=quote_label,
+    )
+
+
+def read_booking_fields(day, at, last_day):
+    """Return (starts_at, ends_on) from the form's date and time boxes, or None if they don't make sense.
+
+    No day means not booked: (None, None).
+    """
+    if day.strip() == "":
+        return None, None
+    try:
+        start_day = date.fromisoformat(day)
+        start_at = time.fromisoformat(at) if at.strip() else None
+        end_day = date.fromisoformat(last_day) if last_day.strip() else None
+    except ValueError:
+        return None
+    if end_day is not None and end_day < start_day:
+        return None
+    return start_time(start_day, start_at), (end_day if end_day != start_day else None)
+
+
+@router.post("/jobs/{number}/edit")
+def edit_job(
+    request: Request, number: int, work: str = Form(""), phone: str = Form(""), address: str = Form(""),
+    day: str = Form(""), at: str = Form(""), last_day: str = Form(""),
+):
+    """Save a job's details. Like any change Jack makes, UNDO puts it back."""
+    client = logged_in_client(request)
+    if client is None:
+        return logged_out(request)
+    job = get_job_by_number(client.id, number)
+    if job is None:
+        return RedirectResponse("/jobs", status_code=303)
+    number_typed = uk_phone(phone)
+    booking = read_booking_fields(day, at, last_day)
+    if work.strip() == "" or number_typed is None or booking is None:
+        problem = "work" if work.strip() == "" else "phone" if number_typed is None else "date"
+        return RedirectResponse(f"/jobs/{number}?problem={problem}", status_code=303)
+    lines = [line.strip() for line in address.splitlines() if line.strip()]
+    whatsapp.remember(
+        client, f"{job_label(number)} edited",
+        ("job", job.id, ["work", "customer_phone", "address", "starts_at", "ends_on", "status"]),
+    )
+    update_job(job.id, work.strip(), number_typed or None, "\n".join(lines) or None, *booking)
+    return back_to(f"/jobs/{number}", "saved", number)
+
+
+@router.post("/jobs/{number}/cancel")
+def cancel_job_button(request: Request, number: int):
+    """The Cancel job button: the same as sending CANCEL J4 on WhatsApp."""
+    client = logged_in_client(request)
+    if client is None:
+        return logged_out(request)
+    job = get_job_by_number(client.id, number)
+    if job is not None and job.status in JOB_GROUPS["open"][1]:
+        whatsapp.cancel_reply(client, job_label(number))
+    return back_to(f"/jobs/{number}", "cancelled", number)
+
+
+@router.post("/jobs/{number}/delete")
+def delete_job_button(request: Request, number: int, confirm: str = Form("")):
+    """Delete a job for good. Only jobs with no quotes, and only after a second tap to confirm."""
+    client = logged_in_client(request)
+    if client is None:
+        return logged_out(request)
+    job = get_job_by_number(client.id, number)
+    if job is None or confirm != "yes" or not delete_job(client.id, job.id):
+        return RedirectResponse(f"/jobs/{number}", status_code=303)
+    return back_to("/jobs", "deleted", number)
+
+
 def quote_pdf_for(quote):
     """Return a quote's PDF, made the same way wherever it's opened from."""
     business_name = get_client(quote.client_id).business_name
@@ -366,7 +484,7 @@ def back_to(where, did, number=0):
     where comes from the form, so only our own pages are allowed: anything else goes
     to Today, so a link elsewhere can't use this to send someone to another site.
     """
-    if not (where in ("/me", "/money") or re.fullmatch(r"/customers/\d+", where)):
+    if not (where in ("/me", "/money", "/jobs") or re.fullmatch(r"/(customers|jobs)/\d+", where)):
         where = "/me"
     return RedirectResponse(f"{where}?did={did}&n={number}", status_code=303)
 

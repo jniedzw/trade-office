@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Jobs · {{ client.business_name }}{% endblock %}
+{% block content %}
+<div class="filters">
+  {% for key, (title, _) in groups.items() %}
+  <a href="/jobs?show={{ key }}"{% if key == show %} class="here"{% endif %}>{{ title }}</a>
+  {% endfor %}
+</div>
+{% if jobs %}
+<input type="search" id="find" placeholder="Search jobs" aria-label="Search jobs">
+{% endif %}
+<div class="card">
+  {% for job in jobs %}
+  <a class="job job-row" href="/jobs/{{ job.number }}">
+    <div class="money-line">
+      <span><strong>{{ job.customer_name }}</strong>: {{ job.work }}</span>
+      <span class="tag">J{{ job.number }}</span>
+    </div>
+    <div class="where">{% if job.starts_at %}{{ when(job.starts_at, job.ends_on) }}{% else %}Not booked · logged {{ day_name(job.time) }}{% endif %}</div>
+  </a>
+  {% else %}
+  <p class="muted">No {{ groups[show][0] | lower }} jobs.</p>
+  {% endfor %}
+  <p class="muted" id="none" hidden>No jobs match that.</p>
+</div>
+<p class="tip">To add a job, send LOG on WhatsApp.</p>
+<script>
+  // Hides the jobs that don't match what's typed. Nothing leaves the phone.
+  const find = document.getElementById("find");
+  if (find) find.addEventListener("input", () => {
+    const words = find.value.trim().toLowerCase();
+    let shown = 0;
+    for (const row of document.querySelectorAll(".job-row")) {
+      const match = row.textContent.toLowerCase().includes(words);
+      row.hidden = !match;
+      shown += match;
+    }
+    document.getElementById("none").hidden = shown > 0;
+  });
+</script>
+{% endblock %}
