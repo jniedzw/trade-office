@@ -1,7 +1,16 @@
 {% extends "base.html" %}
 {% block title %}Today · {{ client.business_name }}{% endblock %}
 {% block content %}
-<h2>Today, {{ day_name(today) }}</h2>
+<p class="hello"><strong>{{ hello }}{% if client.owner_name %} {{ client.owner_name }}{% endif %}</strong></p>
+<p class="muted">{{ day_name(today) }}</p>
+
+<div class="tiles">
+  <div class="tile"><span class="big">{{ todays | length }}</span><span class="small">job{{ "" if todays | length == 1 else "s" }} today</span></div>
+  <div class="tile"><span class="big">{{ week_count }}</span><span class="small">this week</span></div>
+  <a class="tile{% if late %} alert{% endif %}" href="/money"><span class="big">{{ owed or "£0" }}</span><span class="small">{% if late %}owed, {{ late }} overdue{% else %}owed to you{% endif %}</span></a>
+</div>
+
+<h2>Today</h2>
 <div class="card">
   {% for at, job in todays %}
     {% include "job.html" %}
@@ -13,7 +22,7 @@
 <h2>Coming up</h2>
 <div class="card">
   {% for day, jobs in coming_up %}
-    <p><strong>{{ day_name(day) }}</strong></p>
+    <p class="day">{{ day_name(day) }}</p>
     {% for at, job in jobs %}
       {% include "job.html" %}
     {% endfor %}
@@ -22,12 +31,19 @@
   {% endfor %}
 </div>
 
-{% if owed %}
+{% if waiting %}
+<h2>Quotes waiting for an answer</h2>
 <div class="card">
-  <p>You're owed <strong>{{ owed }}</strong>. <a href="/money">See who owes you</a></p>
+  {% for quote in waiting %}
+  <div class="job money-line">
+    <span><strong>{{ quote.customer_name }}</strong>: {{ quote.title }}<br><span class="muted">Sent {{ sent_day(quote.sent_at) }}</span></span>
+    <span><strong>{{ money(quote.total_pence) }}</strong> <span class="tag">{{ quote_label(quote.number) }}</span></span>
+  </div>
+  {% endfor %}
 </div>
 {% endif %}
 
+<p class="tip">To add or change anything, message Jack on WhatsApp.</p>
 <form method="post" action="/logout">
   <button class="quiet" type="submit">Log out</button>
 </form>

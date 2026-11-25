@@ -1022,6 +1022,18 @@ def quotes_for_job(job_id):
         return session.exec(select(Quote).where(Quote.job_id == job_id)).all()
 
 
+def quotes_waiting(client_id):
+    """Return this client's quotes sent to a customer but not yet accepted, oldest first."""
+    with Session(engine) as session:
+        statement = (
+            select(Quote)
+            .where(Quote.client_id == client_id, Quote.sent_at != None)  # noqa: E711
+            .where(Quote.accepted_at == None)  # noqa: E711
+            .order_by(Quote.sent_at)
+        )
+        return session.exec(statement).all()
+
+
 def final_quote_for_job(job_id):
     """Return the newest final quote for a job, or None."""
     with Session(engine) as session:

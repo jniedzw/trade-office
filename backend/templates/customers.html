@@ -1,21 +1,42 @@
 {% extends "base.html" %}
 {% block title %}Customers · {{ client.business_name }}{% endblock %}
 {% block content %}
-<h2>Customers</h2>
+<h2>Customers{% if customers %} ({{ customers | length }}){% endif %}</h2>
+{% if customers %}
+<input type="search" id="find" placeholder="Search by name, address or number" aria-label="Search customers">
+{% endif %}
 <div class="card">
   {% for customer in customers %}
-  <div class="job">
-    <strong>{{ customer.name }}</strong>
-    <span class="muted">· {{ customer.jobs }} job{{ "" if customer.jobs == 1 else "s" }} · last {{ day_name(customer.last_seen) }}</span>
-    {% if customer.address %}
-      <br><a href="https://www.google.com/maps/search/?api=1&query={{ customer.address | replace('\n', ', ') | urlencode }}">{{ customer.address | replace('\n', ', ') }}</a>
-    {% endif %}
-    {% if customer.phone %}
-      <br><a href="tel:{{ customer.phone }}">{{ customer.phone }}</a>
+  <div class="job customer">
+    <div class="money-line">
+      <strong>{{ customer.name }}</strong>
+      <span class="muted">{{ customer.jobs }} job{{ "" if customer.jobs == 1 else "s" }} · last {{ day_name(customer.last_seen) }}</span>
+    </div>
+    {% if customer.address %}<div class="where">{{ customer.address | replace('\n', ', ') }}</div>{% endif %}
+    {% if customer.address or customer.phone %}
+    <div class="actions">
+      {% if customer.phone %}<a href="tel:{{ customer.phone }}">Call</a>{% endif %}
+      {% if customer.address %}<a href="https://www.google.com/maps/search/?api=1&query={{ customer.address | replace('\n', ', ') | urlencode }}">Directions</a>{% endif %}
+    </div>
     {% endif %}
   </div>
   {% else %}
   <p class="muted">No customers yet. Log a job on WhatsApp and they'll show here.</p>
   {% endfor %}
+  <p class="muted" id="none" hidden>No customers match that.</p>
 </div>
+<script>
+  // Hides the customers that don't match what's typed. Nothing leaves the phone.
+  const find = document.getElementById("find");
+  if (find) find.addEventListener("input", () => {
+    const words = find.value.trim().toLowerCase();
+    let shown = 0;
+    for (const row of document.querySelectorAll(".customer")) {
+      const match = row.textContent.toLowerCase().includes(words);
+      row.hidden = !match;
+      shown += match;
+    }
+    document.getElementById("none").hidden = shown > 0;
+  });
+</script>
 {% endblock %}

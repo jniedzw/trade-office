@@ -16,7 +16,8 @@
     .quiet { background: none; color: #666; width: auto; padding: 8px 0; text-decoration: underline; }
     .muted { color: #666; }
     nav { margin-top: 10px; display: flex; gap: 16px; }
-    nav a { color: #b8975a; text-decoration: none; font-weight: 600; }
+    nav a { color: #bdbdbd; text-decoration: none; font-weight: 600; padding-bottom: 4px; }
+    nav a.here { color: #b8975a; border-bottom: 2px solid #b8975a; }
     h2 { font-size: 1rem; margin: 24px 0 8px; }
     .job { padding: 10px 0; border-top: 1px solid #eee; }
     .job:first-of-type { border-top: 0; }
@@ -46,6 +47,26 @@
     .client-card { display: block; text-decoration: none; color: inherit; }
     .client-card:hover { outline: 2px solid #b8975a; }
     body.admin main { max-width: 860px; }
+    /* The tradesperson's pages: made for a phone in a van. */
+    .hello { font-size: 1.4rem; margin: 8px 0 2px; }
+    .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 16px 0; }
+    .tile { background: #fff; border-radius: 12px; padding: 12px; text-decoration: none; color: inherit; }
+    .tile .big { display: block; font-size: 1.3rem; font-weight: 700; }
+    .tile .small { font-size: .8rem; color: #666; }
+    .tile.alert .big { color: #b3261e; }
+    .tag { font-size: .75rem; font-weight: 700; color: #666; background: #f0eee9; border-radius: 6px; padding: 1px 6px; }
+    .tag.done { background: #e5f4e4; color: #1e6b2a; }
+    .tag.late { background: #fbebeb; color: #b3261e; }
+    .actions { display: flex; gap: 8px; margin-top: 8px; }
+    .actions a { flex: 1; text-align: center; padding: 9px; border: 1px solid #d6d3cc; border-radius: 10px;
+                 text-decoration: none; color: #1a1a1a; font-weight: 600; font-size: .9rem; }
+    .where { font-size: .9rem; color: #666; margin-top: 2px; }
+    .day { font-size: .8rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #666; margin: 14px 0 0; }
+    .day:first-child { margin-top: 0; }
+    .money-line { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+    .tip { font-size: .85rem; color: #666; text-align: center; margin: 24px 0 8px; }
+    input[type=search] { font: inherit; width: 100%; box-sizing: border-box; padding: 10px 12px;
+      border: 1px solid #d6d3cc; border-radius: 10px; margin-bottom: 12px; }
   </style>
 </head>
 <body class="{% block body_class %}{% endblock %}">
@@ -54,9 +75,9 @@
     <strong>Ask Jack</strong>{% if client %} · {{ client.business_name }}{% endif %}
     {% if client %}
     <nav>
-      <a href="/me">Today</a>
-      <a href="/customers">Customers</a>
-      <a href="/money">Money</a>
+      <a href="/me"{% if tab == "today" %} class="here"{% endif %}>Today</a>
+      <a href="/customers"{% if tab == "customers" %} class="here"{% endif %}>Customers</a>
+      <a href="/money"{% if tab == "money" %} class="here"{% endif %}>Money</a>
     </nav>
     {% endif %}
     {% endblock %}

@@ -1,26 +1,30 @@
 {% extends "base.html" %}
 {% block title %}Money · {{ client.business_name }}{% endblock %}
 {% block content %}
-<h2>Owed to you: {{ owed_total }}</h2>
+<div class="tiles" style="grid-template-columns: 1fr 1fr">
+  <div class="tile{% if owed | selectattr('overdue', 'gt', 0) | list %} alert{% endif %}"><span class="big">{{ owed_total }}</span><span class="small">owed to you</span></div>
+  <div class="tile"><span class="big">{{ paid_this_month }}</span><span class="small">paid this month</span></div>
+</div>
+
+<h2>Who owes you</h2>
 <div class="card">
   {% for invoice in owed %}
-  <div class="job">
-    <strong>{{ invoice.label }}</strong>: {{ invoice.customer_name }}, {{ invoice.amount }}
-    {% if invoice.overdue > 0 %}<span class="late">· {{ invoice.overdue }} days overdue</span>{% endif %}
+  <div class="job money-line">
+    <span><strong>{{ invoice.customer_name }}</strong> <span class="tag">{{ invoice.label }}</span>
+      {% if invoice.overdue > 0 %}<br><span class="tag late">{{ invoice.overdue }} day{{ "" if invoice.overdue == 1 else "s" }} overdue</span>{% endif %}</span>
+    <strong>{{ invoice.amount }}</strong>
   </div>
   {% else %}
   <p class="muted">Nobody owes you anything.</p>
   {% endfor %}
 </div>
 
-<h2>Paid this month: {{ paid_this_month }}</h2>
-
 <h2>All invoices</h2>
 <div class="card">
   {% for invoice, quote in invoices %}
-  <div class="job">
-    {{ invoice_label(invoice.number) }}: {{ quote.customer_name }}, {{ money(quote.total_pence) }}
-    <span class="muted">· {{ "paid " ~ day_name(invoice.paid_at) if invoice.paid_at else "unpaid" }}</span>
+  <div class="job money-line">
+    <span>{{ invoice_label(invoice.number) }}: {{ quote.customer_name }}, {{ money(quote.total_pence) }}</span>
+    {% if invoice.paid_at %}<span class="tag done">Paid {{ day_name(invoice.paid_at) }}</span>{% else %}<span class="tag">Unpaid</span>{% endif %}
   </div>
   {% else %}
   <p class="muted">No invoices yet.</p>

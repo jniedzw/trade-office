@@ -172,6 +172,27 @@ def test_today_shows_todays_jobs_with_map_and_phone_links(monkeypatch, tmp_path)
     assert 'href="tel:+447700900123"' in text
 
 
+def test_today_shows_a_summary_and_quotes_waiting(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    database.set_owner_name(1, "Dave")
+    book_today(1, "Mrs Jones", "Leaking radiator")
+    sent = database.save_quote(1, "Mr Smith", "Boiler service", "BS", 8500)
+    database.mark_quote_sent(sent, "+447700900123")
+    accepted = database.save_quote(1, "Ms Brown", "New tap", "NT", 9000)
+    database.mark_quote_sent(accepted, "+447700900124")
+    database.accept_quote(accepted)
+
+    text = client.get("/me", headers=as_cookie(log_in())).text
+
+    assert " Dave</strong>" in text
+    assert '<span class="big">1</span><span class="small">job today' in text
+    assert "Quotes waiting for an answer" in text
+    assert "Mr Smith</strong>: Boiler service" in text and "£85.00" in text
+    # Accepted quotes aren't waiting any more.
+    assert "Ms Brown" not in text
+    assert '<a href="/me" class="here">Today</a>' in text
+
+
 def test_customer_details_cant_run_code_in_the_page(monkeypatch, tmp_path):
     use_fakes(monkeypatch, tmp_path)
     book_today(1, "<script>alert(1)</script>", "Tap")
@@ -204,8 +225,8 @@ def test_money_page(monkeypatch, tmp_path):
 
     text = client.get("/money", headers=as_cookie(log_in())).text
 
-    assert "Owed to you: £1,250.50" in text
-    assert "Paid this month: £85.00" in text
+    assert '<span class="big">£1,250.50</span><span class="small">owed to you' in text
+    assert '<span class="big">£85.00</span><span class="small">paid this month' in text
     assert "INV-0002: Mr Smith, £85.00" in text
 
 

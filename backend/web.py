@@ -12,6 +12,7 @@ from database import (
     get_client,
     get_quote,
     get_quote_lines,
+    quotes_waiting,
     SESSION_DAYS,
     booked_jobs,
     client_for_session,
@@ -135,19 +136,33 @@ def log_in(request: Request, token: str):
 
 @router.get("/me", response_class=HTMLResponse)
 def me(request: Request):
-    """The Today page: today's jobs, the rest of the week, and what's owed."""
+    """The Today page: a summary, today's jobs, the rest of the week, and quotes waiting."""
     client = logged_in_client(request)
     if client is None:
         return logged_out(request)
-    today = uk_now(now_utc()).date()
+    now = uk_now(now_utc())
+    today = now.date()
     week = week_days(booked_jobs(client.id, now_utc()), today)
     todays = week[0][1] if week and week[0][0] == today else []
-    owed = sum(invoice["total_pence"] for invoice in unpaid_invoices(client.id))
+    invoices = unpaid_invoices(client.id)
+    days_to_pay = payment_days(client)
+    late = [invoice for invoice in invoices if (now_utc() - invoice["time"]).days > days_to_pay]
     return page(
-        request, "me.html", client=client, today=today, todays=todays,
+        request, "me.html", client=client, today=today, todays=todays, tab="today",
+        hello="Morning" if now.hour < 12 else "Afternoon" if now.hour < 17 else "Evening",
         coming_up=[(day, jobs) for day, jobs in week if day != today],
-        owed=money(owed) if owed else None, day_name=day_name,
+        week_count=len({job.id for _, jobs in week for _, job in jobs}),
+        owed=money(sum(invoice["total_pence"] for invoice in invoices)) if invoices else None,
+        late=len(late), waiting=quotes_waiting(client.id),
+        money=money, quote_label=quote_label, day_name=day_name,
+        sent_day=lambda moment: day_name(to_uk(moment)),
     )
+
+
+def payment_days(client):
+    """Return how many days this client gives customers to pay."""
+    details = get_business_details(client.id)
+    return details.payment_days if details else 14
 
 
 def logged_in_client(request):
@@ -161,7 +176,7 @@ def customers(request: Request):
     if client is None:
         return logged_out(request)
     return page(
-        request, "customers.html", client=client, customers=customers_for(client.id),
+        request, "customers.html", client=client, customers=customers_for(client.id), tab="customers",
         day_name=lambda moment: day_name(to_uk(moment)),
     )
 
@@ -171,8 +186,7 @@ def money_page(request: Request):
     client = logged_in_client(request)
     if client is None:
         return logged_out(request)
-    details = get_business_details(client.id)
-    days_to_pay = details.payment_days if details else 14
+    days_to_pay = payment_days(client)
     owed = [
         {
             "label": invoice_label(invoice["number"]),
@@ -190,7 +204,7 @@ def money_page(request: Request):
         if invoice.paid_at and to_uk(invoice.paid_at).strftime("%Y-%m") == this_month
     )
     return page(
-        request, "money.html", client=client, owed=owed, invoices=list(reversed(invoices)),
+        request, "money.html", client=client, owed=owed, tab="money", invoices=list(reversed(invoices)),
         owed_total=money(sum(invoice["total_pence"] for invoice in unpaid_invoices(client.id))),
         paid_this_month=money(paid), money=money, invoice_label=invoice_label,
         day_name=lambda moment: day_name(to_uk(moment)),
