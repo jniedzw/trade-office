@@ -94,6 +94,8 @@ def quote_page(request, quote, client):
         request, "customer_quote.html", quote=quote, business_name=client.business_name,
         label=quote_label(quote.number), lines=get_quote_lines(quote.id), total=money(quote.total_pence),
         pdf_link=signed_link("quote", quote.id, now_utc()), contact=details.contact if details else "",
+        # Only ask about a review if the business has somewhere to leave one.
+        asks_for_reviews=bool(details and details.review_link),
     )
 
 

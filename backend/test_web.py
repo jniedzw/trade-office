@@ -444,9 +444,12 @@ def test_every_page_needs_logging_in(monkeypatch, tmp_path):
         assert client.post(path).status_code == 401, path
 
 
-def sent_quote(monkeypatch, tmp_path, status="final"):
+def sent_quote(monkeypatch, tmp_path, status="final", review_link="https://g.page/r/test/review"):
     """Save quote 1 for Mrs Jones, and return the path of her quote page."""
     use_fakes(monkeypatch, tmp_path)
+    database.save_business_details(
+        1, legal_name="Test", address="1 Test Street", ref_letters="TP", bank_details="Bank", review_link=review_link
+    )
     monkeypatch.setattr(settings, "QUOTE_LINK_SECRET", "test-secret")
     quote_id = database.save_quote(1, "Mrs Jones", "Bathroom refit", "BR", 125050, ["Fit basin"])
     if status == "final":
@@ -497,6 +500,12 @@ def test_ticking_the_review_box_records_consent(monkeypatch, tmp_path):
     client.post(path, data={"review_ok": "yes"})
 
     assert database.get_quote(1).review_ok is True
+
+
+def test_no_review_box_if_the_business_has_no_review_link(monkeypatch, tmp_path):
+    path = sent_quote(monkeypatch, tmp_path, review_link="")
+
+    assert 'name="review_ok"' not in client.get(path).text
 
 
 def test_the_review_box_starts_unticked(monkeypatch, tmp_path):

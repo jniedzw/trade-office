@@ -22,11 +22,14 @@
 </div>
 {% else %}
 <form method="post">
+  {% if asks_for_reviews %}
   {# Unticked by default: the customer has to choose this, which is what makes it consent. #}
   <label style="display: flex; gap: 10px; align-items: flex-start; margin-bottom: 16px;">
     <input type="checkbox" name="review_ok" value="yes" style="margin-top: 4px;">
-    <span>{{ business_name }} can text me once after the job to ask for a review.</span>
+    <span><strong>Happy to leave a quick review after the job?</strong> It really helps a small local business like {{ business_name }}.
+      <span class="muted">We'll text you once, and you can reply STOP.</span></span>
   </label>
+  {% endif %}
   <button type="submit">Accept quote</button>
 </form>
 <p class="muted">Questions first? Just reply to the text{% if contact %}, or contact {{ contact }}{% endif %}.</p>
