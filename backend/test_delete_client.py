@@ -26,6 +26,8 @@ def fill_up(client_id):
     database.start_web_session(client_id)
     database.record_ai_call(client_id, "QuoteDraft", "claude-sonnet-5-5", 900, 120, 1.5)
     database.remember_change(client_id, "J1 marked done", [database.snapshot("job", job_id, ["status"])])
+    customer = database.customers_for(client_id)[0]
+    database.save_customer_notes(client_id, customer["id"], "Side gate")
 
 
 def rows_for(client_id):

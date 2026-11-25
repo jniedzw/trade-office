@@ -17,6 +17,9 @@ from database import (
     booked_jobs,
     client_for_session,
     customers_for,
+    get_customer,
+    save_customer_details,
+    save_customer_notes,
     end_web_session,
     everything_for,
     get_business_details,
@@ -179,6 +182,63 @@ def customers(request: Request):
         request, "customers.html", client=client, customers=customers_for(client.id), tab="customers",
         day_name=lambda moment: day_name(to_uk(moment)),
     )
+
+
+# Long enough for gate codes and parking, short enough to stay a note.
+NOTES_MAX = 2000
+
+
+def uk_phone(text):
+    """Return a UK number as +44..., "" if text is blank, or None if it isn't a UK number."""
+    digits = "".join(c for c in text if c.isdigit())
+    if digits == "":
+        return ""
+    if digits.startswith("44"):
+        digits = "0" + digits[2:]
+    # UK numbers are 0 then 10 digits; 01, 02, 03 and 07 cover landlines and mobiles.
+    if len(digits) == 11 and digits[:2] in ("01", "02", "03", "07"):
+        return "+44" + digits[1:]
+    return None
+
+
+@router.get("/customers/{customer_id}", response_class=HTMLResponse)
+def customer_page(request: Request, customer_id: int, saved: str = "", problem: str = ""):
+    """One customer: their details, notes, and every job, quote and invoice."""
+    client = logged_in_client(request)
+    if client is None:
+        return logged_out(request)
+    customer = get_customer(client.id, customer_id)
+    if customer is None:
+        return page(request, "message.html", status_code=404, client=client,
+                    heading="Customer not found", text="They may have been removed.")
+    return page(
+        request, "customer.html", client=client, customer=customer, tab="customers",
+        saved=saved, problem=problem, money=money, quote_label=quote_label,
+        invoice_label=invoice_label, day_name=lambda moment: day_name(to_uk(moment)),
+    )
+
+
+@router.post("/customers/{customer_id}/notes")
+def customer_notes(request: Request, customer_id: int, notes: str = Form("")):
+    client = logged_in_client(request)
+    if client is None:
+        return logged_out(request)
+    save_customer_notes(client.id, customer_id, notes.strip()[:NOTES_MAX])
+    return RedirectResponse(f"/customers/{customer_id}?saved=notes", status_code=303)
+
+
+@router.post("/customers/{customer_id}/details")
+def customer_details(request: Request, customer_id: int, phone: str = Form(""), address: str = Form("")):
+    client = logged_in_client(request)
+    if client is None:
+        return logged_out(request)
+    number = uk_phone(phone)
+    if number is None:
+        return RedirectResponse(f"/customers/{customer_id}?problem=phone", status_code=303)
+    # Blank lines dropped, so the address is the same shape as one sent on WhatsApp.
+    lines = [line.strip() for line in address.splitlines() if line.strip()]
+    save_customer_details(client.id, customer_id, number or None, "\n".join(lines) or None)
+    return RedirectResponse(f"/customers/{customer_id}?saved=details", status_code=303)
 
 
 @router.get("/money", response_class=HTMLResponse)

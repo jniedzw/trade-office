@@ -4,7 +4,7 @@ from io import BytesIO
 
 from openpyxl import load_workbook
 
-from database import Invoice, Job, Quote
+from database import Customer, Invoice, Job, Quote
 from export import make_export
 
 
@@ -18,7 +18,9 @@ def made_up_data():
     job = Job(id=1, number=1, client_id=1, customer_name="Mrs Jones", work="Bathroom refit", status="paid",
               address="12 Test Road\nLiverpool", time=datetime(2026, 11, 1, tzinfo=timezone.utc),
               starts_at=datetime(2026, 11, 9, 8, 0, tzinfo=timezone.utc), ends_on=date(2026, 11, 13))
-    return {"jobs": [job], "quotes": [quote], "invoices": [(invoice, quote)], "prices": [("day rate", 25000)]}
+    customer = Customer(id=1, client_id=1, name="Mrs Jones", name_key="mrs jones", notes="Side gate")
+    return {"jobs": [job], "quotes": [quote], "invoices": [(invoice, quote)], "prices": [("day rate", 25000)],
+            "customers": [customer]}
 
 
 def open_export(data=None, markup=15):
@@ -26,7 +28,7 @@ def open_export(data=None, markup=15):
 
 
 def test_export_has_a_sheet_for_each_kind_of_data():
-    assert open_export().sheetnames == ["Jobs", "Quotes", "Invoices", "Prices"]
+    assert open_export().sheetnames == ["Jobs", "Quotes", "Invoices", "Customers", "Prices"]
 
 
 def test_money_is_a_number_in_pounds_not_text():
@@ -59,7 +61,7 @@ def test_prices_include_the_markup():
 
 
 def test_an_empty_export_still_works():
-    data = {"jobs": [], "quotes": [], "invoices": [], "prices": []}
+    data = {"jobs": [], "quotes": [], "invoices": [], "prices": [], "customers": []}
 
     assert open_export(data)["Jobs"].max_row == 1
 
@@ -70,3 +72,7 @@ def test_numbers_are_shown_as_labels():
     assert book["Jobs"]["A2"].value == "J1"
     assert [book["Quotes"]["A2"].value, book["Quotes"]["G2"].value] == ["Q2", "J1"]
     assert [book["Invoices"]["A2"].value, book["Invoices"]["E2"].value] == ["INV-0001", "Q2"]
+
+
+def test_customer_notes_are_in_the_export():
+    assert open_export()["Customers"]["D2"].value == "Side gate"

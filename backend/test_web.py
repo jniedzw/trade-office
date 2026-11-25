@@ -10,6 +10,7 @@ import diary
 import export
 import quotes
 import settings
+import web
 import whatsapp
 from database import Client, LoginLink
 from test_main import OWNER, client, use_fakes
@@ -216,6 +217,102 @@ def test_customers_page(monkeypatch, tmp_path):
     assert "Mr Smith</strong>" in text and "0 jobs" in text
 
 
+def customer_id(name="Mrs Jones", client_id=1):
+    """Return the id of this client's customer with this name."""
+    return next(c["id"] for c in database.customers_for(client_id) if c["name"] == name)
+
+
+def test_customer_page_shows_everything_for_that_customer(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    database.save_job(1, "Mrs Jones", "Leaking radiator", customer_phone="+447700900123")
+    quote_id = database.save_quote(1, "mrs jones", "New radiator", "NR", 42000)
+    database.save_invoice(1, quote_id, "12 Test Road")
+    database.save_job(1, "Mr Smith", "Boiler")
+
+    text = client.get(f"/customers/{customer_id()}", headers=as_cookie(log_in())).text
+
+    assert "Leaking radiator" in text and "New radiator" in text and "£420.00" in text
+    assert "INV-0001" in text and 'href="tel:+447700900123"' in text
+    assert "Boiler" not in text
+
+
+def test_customer_list_links_to_each_customer(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    database.save_job(1, "Mrs Jones", "Radiator")
+
+    text = client.get("/customers", headers=as_cookie(log_in())).text
+
+    assert f'href="/customers/{customer_id()}"' in text
+
+
+def test_notes_are_saved_and_shown(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    database.save_job(1, "Mrs Jones", "Radiator")
+    cookie = as_cookie(log_in())
+    path = f"/customers/{customer_id()}"
+
+    response = client.post(f"{path}/notes", data={"notes": " Side gate, dog in garden "}, headers=cookie,
+                           follow_redirects=False)
+
+    assert response.status_code == 303
+    assert "Side gate, dog in garden</textarea>" in client.get(path, headers=cookie).text
+    assert "Side gate, dog in garden" in client.get("/customers", headers=cookie).text
+
+
+def test_changing_details_updates_open_jobs_but_not_finished_ones(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    old = database.save_job(1, "Mrs Jones", "Old job", customer_phone="+447700900111")
+    database.mark_job_done(old)
+    open_job = database.save_job(1, "Mrs Jones", "New job", customer_phone="+447700900111")
+    cookie = as_cookie(log_in())
+
+    client.post(f"/customers/{customer_id()}/details", headers=cookie,
+                data={"phone": "07700 900999", "address": "12 Test Road\n\nLiverpool "})
+
+    assert database.get_job(open_job).customer_phone == "+447700900999"
+    assert database.get_job(open_job).address == "12 Test Road\nLiverpool"
+    assert database.get_job(old).customer_phone == "+447700900111"
+    assert database.customers_for(1)[0]["phone"] == "+447700900999"
+
+
+def test_a_bad_phone_number_changes_nothing(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    job_id = database.save_job(1, "Mrs Jones", "Radiator", customer_phone="+447700900111")
+    cookie = as_cookie(log_in())
+    path = f"/customers/{customer_id()}"
+
+    response = client.post(f"{path}/details", headers=cookie, data={"phone": "12345", "address": ""},
+                           follow_redirects=False)
+
+    assert "doesn't look like a UK phone number" in client.get(response.headers["location"], headers=cookie).text
+    assert database.get_job(job_id).customer_phone == "+447700900111"
+
+
+def test_uk_phone():
+    assert web.uk_phone("07700 900123") == "+447700900123"
+    assert web.uk_phone("+44 151 496 0000") == "+441514960000"
+    assert web.uk_phone("0151 496 0000") == "+441514960000"
+    assert web.uk_phone("  ") == ""
+    for bad in ["12345", "0800 123 4567", "+1 212 555 0100"]:
+        assert web.uk_phone(bad) is None, bad
+
+
+def test_nobody_can_open_or_change_another_clients_customer(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    add_other_client()
+    database.save_job(2, "Their Customer", "Their job", customer_phone="+447700900222")
+    theirs = customer_id("Their Customer", client_id=2)
+    cookie = as_cookie(log_in(OWNER))
+
+    response = client.get(f"/customers/{theirs}", headers=cookie)
+    for kind, data in [("notes", {"notes": "hacked"}), ("details", {"phone": "07700900999", "address": ""})]:
+        client.post(f"/customers/{theirs}/{kind}", data=data, headers=cookie, follow_redirects=False)
+
+    assert response.status_code == 404 and "Their Customer" not in response.text
+    assert database.customers_for(2)[0]["notes"] == ""
+    assert database.customers_for(2)[0]["phone"] == "+447700900222"
+
+
 def test_money_page(monkeypatch, tmp_path):
     use_fakes(monkeypatch, tmp_path)
     for name, pence in [("Mrs Jones", 125050), ("Mr Smith", 8500)]:
@@ -258,8 +355,10 @@ def test_no_page_shows_another_clients_data(monkeypatch, tmp_path):
 def test_every_page_needs_logging_in(monkeypatch, tmp_path):
     use_fakes(monkeypatch, tmp_path)
 
-    for path in ["/me", "/customers", "/money", "/download"]:
+    for path in ["/me", "/customers", "/customers/1", "/money", "/download"]:
         assert client.get(path).status_code == 401, path
+    for path in ["/customers/1/notes", "/customers/1/details"]:
+        assert client.post(path).status_code == 401, path
 
 
 def sent_quote(monkeypatch, tmp_path, status="final"):

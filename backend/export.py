@@ -92,6 +92,12 @@ def make_export(data, markup_percent):
         invoices, {1: DAY, 5: MONEY, 6: DAY},
     )
 
+    customers = [
+        [customer.name, customer.phone or "", (customer.address or "").replace("\n", ", "), customer.notes]
+        for customer in data["customers"]
+    ]
+    add_sheet(book, "Customers", ["Customer", "Phone", "Address", "Notes"], customers)
+
     prices = [[name, pounds(pence)] for name, pence in data["prices"]]
     prices.append(["Materials markup", f"{markup_percent}%"])
     add_sheet(book, "Prices", ["Item", "Price"], prices, {1: MONEY})

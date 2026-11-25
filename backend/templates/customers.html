@@ -9,9 +9,10 @@
   {% for customer in customers %}
   <div class="job customer">
     <div class="money-line">
-      <strong>{{ customer.name }}</strong>
+      <a href="/customers/{{ customer.id }}" class="name"><strong>{{ customer.name }}</strong></a>
       <span class="muted">{{ customer.jobs }} job{{ "" if customer.jobs == 1 else "s" }} · last {{ day_name(customer.last_seen) }}</span>
     </div>
+    {% if customer.notes %}<div class="where">📝 {{ customer.notes | truncate(60) }}</div>{% endif %}
     {% if customer.address %}<div class="where">{{ customer.address | replace('\n', ', ') }}</div>{% endif %}
     {% if customer.address or customer.phone %}
     <div class="actions">

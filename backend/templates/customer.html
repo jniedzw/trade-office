@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}{{ customer.name }} · {{ client.business_name }}{% endblock %}
+{% block content %}
+<p><a href="/customers" class="muted">← All customers</a></p>
+<p class="hello"><strong>{{ customer.name }}</strong></p>
+<p class="muted">{{ customer.jobs }} job{{ "" if customer.jobs == 1 else "s" }} · last seen {{ day_name(customer.last_seen) }}</p>
+
+{% if saved %}<div class="notice">Saved.</div>{% endif %}
+{% if problem == "phone" %}<div class="problem">That doesn't look like a UK phone number, like 07700 900123. Nothing was changed.</div>{% endif %}
+
+{% if customer.phone or customer.address %}
+<div class="actions" style="margin-bottom:16px">
+  {% if customer.phone %}<a href="tel:{{ customer.phone }}">Call</a>{% endif %}
+  {% if customer.address %}<a href="https://www.google.com/maps/search/?api=1&query={{ customer.address | replace('\n', ', ') | urlencode }}">Directions</a>{% endif %}
+</div>
+{% endif %}
+
+<h2>Notes</h2>
+<form class="card" method="post" action="/customers/{{ customer.id }}/notes">
+  <div class="field">
+    <label for="notes">Anything worth remembering <span class="hint">(like a gate code or where to park)</span></label>
+    <textarea id="notes" name="notes" rows="4" maxlength="2000">{{ customer.notes }}</textarea>
+  </div>
+  <p class="hint muted" style="font-size:.8rem">Only what you need for the job. Nothing about their health, and nothing you wouldn't want them to read.</p>
+  <button type="submit">Save notes</button>
+</form>
+
+<h2>Details</h2>
+<form class="card" method="post" action="/customers/{{ customer.id }}/details">
+  <div class="fields">
+    <div class="field">
+      <label for="phone">Phone</label>
+      <input id="phone" name="phone" type="text" inputmode="tel" autocomplete="off" value="{{ customer.phone or '' }}">
+    </div>
+    <div class="field">
+      <label for="address">Address <span class="hint">(one line each)</span></label>
+      <textarea id="address" name="address" rows="3">{{ customer.address or '' }}</textarea>
+    </div>
+  </div>
+  <p class="muted" style="font-size:.8rem">Changes go on their open jobs too. Sent invoices stay as they were.</p>
+  <button type="submit">Save details</button>
+</form>
+
+<h2>Jobs</h2>
+<div class="card">
+  {% for job in customer.job_list %}
+  <div class="job money-line">
+    <span>{{ job.work }}{% if job.starts_at %}<br><span class="muted">Booked {{ day_name(job.starts_at) }}</span>{% endif %}</span>
+    <span><span class="tag{% if job.status in ('done', 'invoiced', 'paid') %} done{% endif %}">{{ job.status | capitalize }}</span>
+      {% if job.number %}<span class="tag">J{{ job.number }}</span>{% endif %}</span>
+  </div>
+  {% else %}
+  <p class="muted">No jobs yet.</p>
+  {% endfor %}
+</div>
+
+<h2>Quotes</h2>
+<div class="card">
+  {% for quote in customer.quote_list %}
+  <div class="job money-line">
+    <span>{{ quote.title }}<br><span class="muted">
+      {% if quote.accepted_at %}Accepted {{ day_name(quote.accepted_at) }}{% elif quote.sent_at %}Sent {{ day_name(quote.sent_at) }}, no answer yet{% else %}{{ quote.status | capitalize }}, not sent{% endif %}</span></span>
+    <span><strong>{{ money(quote.total_pence) }}</strong> <span class="tag">{{ quote_label(quote.number) }}</span></span>
+  </div>
+  {% else %}
+  <p class="muted">No quotes yet.</p>
+  {% endfor %}
+</div>
+
+<h2>Invoices</h2>
+<div class="card">
+  {% for invoice, quote in customer.invoice_list %}
+  <div class="job money-line">
+    <span>{{ invoice_label(invoice.number) }}: {{ money(quote.total_pence) }}</span>
+    {% if invoice.paid_at %}<span class="tag done">Paid {{ day_name(invoice.paid_at) }}</span>{% else %}<span class="tag late">Unpaid</span>{% endif %}
+  </div>
+  {% else %}
+  <p class="muted">No invoices yet.</p>
+  {% endfor %}
+</div>
+{% endblock %}

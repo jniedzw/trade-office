@@ -244,6 +244,26 @@ class WebSession(SQLModel, table=True):
     expires_at: datetime
 
 
+class Customer(SQLModel, table=True):
+    """One of a client's customers, made the first time their name turns up on a job or quote.
+
+    Jobs and quotes still hold the customer's name; this row adds notes, and any
+    phone or address the tradesperson corrected on their web page.
+    """
+
+    __table_args__ = (UniqueConstraint("client_id", "name_key"),)
+    id: int | None = Field(default=None, primary_key=True)
+    client_id: int = Field(foreign_key="client.id", index=True)
+    name: str
+    # The name in lower case without spaces at the ends, so "mrs jones" and "Mrs Jones" are one customer.
+    name_key: str
+    # None until the tradesperson sets them; until then the newest job's are used.
+    phone: str | None = None
+    address: str | None = None
+    notes: str = ""
+    time: datetime = Field(default_factory=now_utc)
+
+
 class UndoStep(SQLModel, table=True):
     """The last change Jack made for a client, kept so UNDO can put it back."""
 
@@ -720,7 +740,11 @@ def everything_for(client_id):
             .where(Invoice.quote_id == Quote.id, Invoice.client_id == client_id)
             .order_by(Invoice.number)
         ).all()
-    return {"jobs": jobs, "quotes": quotes, "invoices": invoices, "prices": get_prices(client_id)}
+        customers = session.exec(select(Customer).where(Customer.client_id == client_id).order_by(Customer.name)).all()
+    return {
+        "jobs": jobs, "quotes": quotes, "invoices": invoices, "prices": get_prices(client_id),
+        "customers": customers,
+    }
 
 
 def hash_token(token):
@@ -795,26 +819,97 @@ def end_web_session(token):
             session.commit()
 
 
+def name_key(name):
+    """Return the key that says two names are the same customer, like "mrs jones"."""
+    return name.strip().lower()
+
+
 def customers_for(client_id):
     """Return this client's customers, from their jobs and quotes, most recent first.
 
-    Each is a dict: name, phone, address, how many jobs, and when we last saw them.
+    Each is a dict: id, name, phone, address, notes, how many jobs, and when we last
+    saw them. A customer seen for the first time gets a Customer row, so they have an id.
     """
     data = everything_for(client_id)
     customers = {}
     # Oldest first, so the newest phone number and address win.
     records = sorted(data["jobs"] + data["quotes"], key=lambda record: as_utc(record.time))
     for record in records:
-        key = record.customer_name.strip().lower()
         customer = customers.setdefault(
-            key, {"name": record.customer_name, "phone": None, "address": None, "jobs": 0}
+            name_key(record.customer_name),
+            {"name": record.customer_name, "phone": None, "address": None, "jobs": 0},
         )
         if isinstance(record, Job):
             customer["jobs"] += 1
             customer["phone"] = record.customer_phone or customer["phone"]
             customer["address"] = record.address or customer["address"]
         customer["last_seen"] = as_utc(record.time)
+
+    with Session(engine) as session:
+        saved = {row.name_key: row for row in session.exec(select(Customer).where(Customer.client_id == client_id))}
+        for key, customer in customers.items():
+            if key not in saved:
+                saved[key] = Customer(client_id=client_id, name=customer["name"], name_key=key)
+                session.add(saved[key])
+        session.commit()
+        for key, customer in customers.items():
+            row = saved[key]
+            # What the tradesperson typed on their page beats what was on the jobs.
+            customer.update(
+                id=row.id, notes=row.notes,
+                phone=row.phone or customer["phone"], address=row.address or customer["address"],
+            )
     return sorted(customers.values(), key=lambda customer: customer["last_seen"], reverse=True)
+
+
+def get_customer(client_id, customer_id):
+    """Return this client's customer with this id, with their jobs, quotes and invoices, or None.
+
+    The client_id check means one client can never open another's customer.
+    """
+    for customer in customers_for(client_id):
+        if customer["id"] == customer_id:
+            break
+    else:
+        return None
+    key = name_key(customer["name"])
+    data = everything_for(client_id)
+    customer["job_list"] = [job for job in reversed(data["jobs"]) if name_key(job.customer_name) == key]
+    customer["quote_list"] = [quote for quote in reversed(data["quotes"]) if name_key(quote.customer_name) == key]
+    customer["invoice_list"] = [
+        (invoice, quote) for invoice, quote in reversed(data["invoices"]) if name_key(quote.customer_name) == key
+    ]
+    return customer
+
+
+def save_customer_notes(client_id, customer_id, notes):
+    """Save the notes for this client's customer."""
+    with Session(engine) as session:
+        row = session.get(Customer, customer_id)
+        if row and row.client_id == client_id:
+            row.notes = notes
+            session.add(row)
+            session.commit()
+
+
+def save_customer_details(client_id, customer_id, phone, address):
+    """Save a customer's phone and address, and put them on their open jobs too.
+
+    Open jobs get them so Today's Call and Directions buttons use the new ones.
+    Finished jobs and invoices keep what they had: they're a record of what happened.
+    """
+    with Session(engine) as session:
+        row = session.get(Customer, customer_id)
+        if row is None or row.client_id != client_id:
+            return
+        row.phone, row.address = phone, address
+        session.add(row)
+        jobs = session.exec(select(Job).where(Job.client_id == client_id, Job.status.in_(OPEN_JOB))).all()
+        for job in jobs:
+            if name_key(job.customer_name) == row.name_key:
+                job.customer_phone, job.address = phone, address
+                session.add(job)
+        session.commit()
 
 
 def get_job_by_number(client_id, number):
