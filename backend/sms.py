@@ -1,5 +1,7 @@
 import json
 
+import requests
+
 from twilio.rest import Client
 
 import settings
@@ -68,6 +70,21 @@ def send_weekly_update(to: str, jobs: str, owed: str) -> str:
         status_callback=f"{settings.PUBLIC_URL}/whatsapp-status",
     )
     return message.sid
+
+
+# Claude reads photos up to this size.
+MAX_PHOTO_BYTES = 5 * 1024 * 1024
+
+
+def download_media(url: str) -> bytes | None:
+    """Download a photo someone sent us on WhatsApp, or return None if it's too big or fails."""
+    # Twilio only hands media over to us, so we prove who we are with our API key.
+    response = requests.get(
+        url, auth=(settings.TWILIO_API_KEY_SID, settings.TWILIO_API_KEY_SECRET), timeout=20
+    )
+    if response.status_code != 200 or len(response.content) > MAX_PHOTO_BYTES:
+        return None
+    return response.content
 
 
 def count_old_twilio_records(cutoff) -> tuple[int, int]:

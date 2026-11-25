@@ -282,3 +282,14 @@ def test_a_typed_total_beats_the_price_list(monkeypatch):
     use_fake_claude(monkeypatch, draft)
 
     assert read_quote(MESSAGE, prices=PRICE_LIST)["total_pence"] == 125000
+
+
+def test_photos_go_before_the_words():
+    ai.current_photos.set((("image/png", b"abc"),))
+
+    content = ai.with_photos("QUOTE mrs jones")
+
+    assert content[0]["type"] == "image" and content[0]["source"]["data"] == "YWJj"
+    assert content[1] == {"type": "text", "text": "QUOTE mrs jones"}
+    ai.current_photos.set(())
+    assert ai.with_photos("hi") == "hi"

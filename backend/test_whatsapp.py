@@ -4,7 +4,9 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from sqlmodel import Session, select
+from twilio.request_validator import RequestValidator
 
+import ai
 import alerts
 import database
 import diary
@@ -1286,3 +1288,56 @@ def test_who_owes_me_offers_reminders_only_when_something_is_overdue(monkeypatch
     overdue_invoice("Mr Smith", "+447700900456", days_ago=20)
     text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "OWED")
     assert buttons == ("HX_OWED", {})
+
+
+PHOTO = [("https://api.twilio.com/media/ME1", "image/jpeg")]
+
+
+def test_a_photo_with_a_command_goes_to_the_ai(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    seen = []
+
+    def fake_read_quote(details, **kwargs):
+        seen.append(ai.current_photos.get())
+        return None
+
+    monkeypatch.setattr(whatsapp, "read_quote", fake_read_quote)
+
+    whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "QUOTE mrs jones bathroom 1250", PHOTO)
+
+    assert seen == [(("image/jpeg", b"photo-bytes"),)]
+
+
+def test_a_photo_on_its_own_gets_asked_what_to_do(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "", PHOTO)
+
+    assert text == whatsapp.PHOTO_HELP
+
+
+def test_a_voice_note_gets_a_polite_no_for_now(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "", [("https://x/ME2", "audio/ogg")])
+
+    assert text == whatsapp.VOICE_NOT_YET
+
+
+def test_other_files_get_a_polite_no(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "", [("https://x/ME3", "application/pdf")])
+
+    assert text == whatsapp.OTHER_FILES
+
+
+def test_photos_arrive_through_the_webhook(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    form = {"From": f"whatsapp:{OWNER}", "To": f"whatsapp:{OUR_NUMBER}", "Body": "",
+            "NumMedia": "1", "MediaUrl0": "https://api.twilio.com/media/ME1", "MediaContentType0": "image/jpeg"}
+    signature = RequestValidator(settings.TWILIO_AUTH_TOKEN).compute_signature(settings.PUBLIC_URL + "/whatsapp", form)
+
+    response = client.post("/whatsapp", data=form, headers={"X-Twilio-Signature": signature})
+
+    assert "Got your photo" in response.text

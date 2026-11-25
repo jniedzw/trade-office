@@ -1,5 +1,6 @@
 """Reading a tradesperson's rough WhatsApp message into a quote, using Claude."""
 
+import base64
 import json
 import re
 import time
@@ -19,6 +20,13 @@ AI_MODEL = "claude-sonnet-5-5"
 # Which client the AI is working for right now, so each call's cost is logged
 # against them. main.py sets it for every WhatsApp message.
 current_client_id = ContextVar("current_client_id", default=None)
+# Photos sent with the message being handled, as (type, bytes), so the AI can see them.
+current_photos = ContextVar("current_photos", default=())
+
+PHOTO_NOTE = (
+    "\nThere may be photos of the job. Use them to describe the work, but never for a "
+    "price, a quantity, a name, an address or a phone number: those only come from the words."
+)
 
 INSTRUCTIONS = """You read WhatsApp messages from a UK tradesperson who wants to quote a customer.
 Pick out:
@@ -129,8 +137,8 @@ def ask_claude(message, system=INSTRUCTIONS, shape=None):
     response = client.beta.messages.parse(
         model=AI_MODEL,
         max_tokens=2000,
-        system=system,
-        messages=[{"role": "user", "content": message}],
+        system=system + (PHOTO_NOTE if current_photos.get() else ""),
+        messages=[{"role": "user", "content": with_photos(message)}],
         output_format=shape or QuoteDraft,
         # Picking out details is simple work, so Claude needn't think hard.
         output_config={"effort": "low"},
@@ -141,6 +149,18 @@ def ask_claude(message, system=INSTRUCTIONS, shape=None):
     record(system, shape, response, time.perf_counter() - started)
     # parsed_output is None if Claude refused or stopped early.
     return response.parsed_output
+
+
+def with_photos(message):
+    """Return the message for Claude, with any photos from this WhatsApp message first."""
+    photos = current_photos.get()
+    if not photos:
+        return message
+    pictures = [
+        {"type": "image", "source": {"type": "base64", "media_type": kind, "data": base64.b64encode(data).decode()}}
+        for kind, data in photos
+    ]
+    return [*pictures, {"type": "text", "text": message}]
 
 
 def record(system, shape, response, seconds):

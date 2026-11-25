@@ -274,7 +274,11 @@ async def incoming_whatsapp(
     # We make each ID a command, like "FINAL 6", so buttons and typing work the same.
     # Replying in the response sends it straight back through WhatsApp.
     # A choice from a list menu arrives the same way, with its ID in ListId.
-    reply = whatsapp_reply(From, ButtonPayload or ListId or Body)
+    # Attachments come as MediaUrl0, MediaContentType0, MediaUrl1... with NumMedia saying how many.
+    form = await request.form()
+    count = min(int(form.get("NumMedia") or 0), 5)
+    media = [(form[f"MediaUrl{n}"], form[f"MediaContentType{n}"]) for n in range(count)]
+    reply = whatsapp_reply(From, ButtonPayload or ListId or Body, media)
     twiml = MessagingResponse()
     if reply.buttons:
         reply = send_with_buttons(From, reply)

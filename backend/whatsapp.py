@@ -71,7 +71,7 @@ from quotes import (
     signed_link,
     to_pence,
 )
-from sms import send_whatsapp, send_whatsapp_buttons
+from sms import download_media, send_whatsapp, send_whatsapp_buttons
 
 # Far more quotes than a tradesperson makes in a day, so only a fault or misuse hits it.
 MAX_QUOTES_PER_DAY = 50
@@ -833,14 +833,37 @@ COMMANDS = {
 }
 
 
-def whatsapp_reply(sender, body=""):
-    """Handle a WhatsApp message and return our Reply."""
+# Photo types Claude can read.
+PHOTO_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+
+PHOTO_HELP = (
+    "Got your photo. What should I do with it? Send it again with a caption, like:\n"
+    "QUOTE Mrs Jones bathroom, 3 days, 650 materials\nLOG Mrs Jones, leaking radiator"
+)
+VOICE_NOT_YET = "I can't listen to voice notes yet, sorry. Please type it out, like: QUOTE Mrs Jones bathroom 1250"
+OTHER_FILES = "I can only read photos and messages for now. Please type it out, or send a photo."
+
+
+def whatsapp_reply(sender, body="", media=()):
+    """Handle a WhatsApp message and return our Reply.
+
+    media is a list of (link, type) for anything attached, like a photo.
+    """
     # Twilio writes WhatsApp numbers as "whatsapp:+447...", so take that off first.
     client = get_client_by_owner(sender.removeprefix("whatsapp:"))
     if client is None or not client.active:
         return Reply(WHATSAPP_NOT_A_CLIENT)
     # Any AI calls for this message are logged against this client.
     ai.current_client_id.set(client.id)
+
+    # Photos go to the AI with the words. They're never saved.
+    photos = [(kind, download_media(link)) for link, kind in media if kind in PHOTO_TYPES]
+    photos = [(kind, data) for kind, data in photos if data]
+    ai.current_photos.set(tuple(photos))
+    if media and not body.strip():
+        if any(kind.startswith("audio/") for link, kind in media):
+            return Reply(VOICE_NOT_YET)
+        return Reply(PHOTO_HELP if photos else OTHER_FILES)
 
     # A menu choice may arrive as its title, like "New quote", so use its command.
     body = command_for_title(body) or body.strip()
