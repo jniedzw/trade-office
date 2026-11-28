@@ -17,6 +17,7 @@ import settings
 import whatsapp
 from database import Client
 from test_main import (
+    sent_whatsapp,
     OUR_NUMBER,
     JAMES,
     MOBILE_CALLER,
@@ -337,6 +338,7 @@ def use_buttons(monkeypatch, failing=False):
 
     def fake_send_whatsapp(to, body="", media_url=None):
         sent.append(("pdf", media_url is not None))
+        sent_whatsapp.append((body, media_url))
 
     def fake_send_whatsapp_buttons(to, template, variables):
         if failing:
@@ -353,11 +355,10 @@ def test_a_draft_quote_gets_make_final_buttons(monkeypatch, tmp_path):
     use_quote_links(monkeypatch, tmp_path)
     sent = use_buttons(monkeypatch)
 
-    response = signed_whatsapp(OWNER, "QUOTE Mr Smith | Boiler service | BS | 85")
+    signed_whatsapp(OWNER, "QUOTE Mr Smith | Boiler service | BS | 85")
 
     # The PDF first, then the buttons for the new quote, and nothing in the response.
     assert sent == [("pdf", True), ("waited", None), ("HX_DRAFT", "2")]
-    assert "<Message>" not in response.text
 
 
 def test_a_final_quote_gets_make_invoice_buttons(monkeypatch, tmp_path):
@@ -373,11 +374,11 @@ def test_a_plain_reply_if_buttons_fail(monkeypatch, tmp_path):
     use_quote_links(monkeypatch, tmp_path)
     use_buttons(monkeypatch, failing=True)
 
-    response = signed_whatsapp(OWNER, "FINAL 1")
+    signed_whatsapp(OWNER, "FINAL 1")
 
     # The PDF already went, so the plain reply is just the words.
-    assert "Quote Q1 is final" in response.text
-    assert "<Media>" not in response.text
+    words, link = sent_whatsapp[-1]
+    assert "Quote Q1 is final" in words and link is None
 
 
 def test_quotes_stop_at_the_daily_limit(monkeypatch, tmp_path):
@@ -540,11 +541,10 @@ def test_hi_gets_the_menu(monkeypatch, tmp_path):
     sent = use_buttons(monkeypatch)
     monkeypatch.setattr(settings, "WHATSAPP_MENU", "HX_MENU")
 
-    response = signed_whatsapp(OWNER, "Morning")
+    signed_whatsapp(OWNER, "Morning")
 
     # The briefing goes first as its own message, then the buttons.
     assert sent == [("pdf", False), ("waited", None), ("HX_MENU", None)]
-    assert "<Message>" not in response.text
 
 
 def test_without_the_menu_template_hi_gets_help(monkeypatch, tmp_path):
@@ -1010,13 +1010,12 @@ def test_done_marks_a_job_finished_and_offers_an_invoice(monkeypatch, tmp_path):
     log_test_job()
     database.finish_quote(1, database.save_quote(1, "Mrs Jones", "Radiator", "RAD", 45000, job_id=1))
 
-    response = signed_whatsapp(OWNER, "DONE J1")
+    signed_whatsapp(OWNER, "DONE J1")
 
     job = database.get_job(1)
     assert job.status == "done" and job.done_at is not None
     # The Make invoice button, for quote Q2 (Q1 came from use_final_quote).
     assert sent == [("HX_FINAL", "2")]
-    assert "<Message>" not in response.text
 
 
 def test_done_offers_an_invoice_for_a_quote_made_without_the_job(monkeypatch, tmp_path):
@@ -1379,9 +1378,9 @@ def test_photos_arrive_through_the_webhook(monkeypatch, tmp_path):
             "NumMedia": "1", "MediaUrl0": "https://api.twilio.com/media/ME1", "MediaContentType0": "image/jpeg"}
     signature = RequestValidator(settings.TWILIO_AUTH_TOKEN).compute_signature(settings.PUBLIC_URL + "/whatsapp", form)
 
-    response = client.post("/whatsapp", data=form, headers={"X-Twilio-Signature": signature})
+    client.post("/whatsapp", data=form, headers={"X-Twilio-Signature": signature})
 
-    assert "Got your photo" in response.text
+    assert sent_whatsapp[-1][0].startswith("Got your photo")
 
 
 VOICE = [("https://api.twilio.com/media/ME9", "audio/ogg; codecs=opus")]

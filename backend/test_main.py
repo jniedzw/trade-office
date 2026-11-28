@@ -22,6 +22,20 @@ OWNER = "+447700900789"
 JAMES = "+447700900321"
 
 
+# Every WhatsApp message Jack "sent" in the current test, as (words, link to a file or None).
+sent_whatsapp = []
+
+
+def fake_send_whatsapp(to, body="", media_url=None):
+    sent_whatsapp.append((body, media_url))
+    return "SM_REPLY"
+
+
+def last_reply():
+    """Return the words of the last WhatsApp message Jack sent."""
+    return sent_whatsapp[-1][0]
+
+
 def use_fakes(monkeypatch, tmp_path, active=True, failing=()):
     """Stop real texts, use a temporary database with one test client,
     and keep the call log in a temporary folder.
@@ -59,6 +73,10 @@ def use_fakes(monkeypatch, tmp_path, active=True, failing=()):
     monkeypatch.setattr(settings, "WHATSAPP_ACCEPTED_TEMPLATE", None)
     for group in ("JOBS", "MONEY", "MORE"):
         monkeypatch.setattr(settings, f"WHATSAPP_{group}_MENU", None)
+    # WhatsApp replies are kept in sent_whatsapp instead of going to Twilio.
+    sent_whatsapp.clear()
+    monkeypatch.setattr(whatsapp, "send_whatsapp", fake_send_whatsapp)
+    monkeypatch.setattr(whatsapp, "wait_until_sent", lambda message_sid: None)
     # Photos are "downloaded" without reaching Twilio.
     monkeypatch.setattr(whatsapp, "download_media", lambda link, max_bytes=None: b"photo-bytes")
     # Voice notes are never really sent to AssemblyAI from a test.
@@ -564,25 +582,27 @@ def test_whatsapp_recognises_a_client(monkeypatch, tmp_path):
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/xml"
-    assert "Things you can send me" in response.text
-    assert texted_numbers == []  # the reply goes back in the response, not by SMS
+    # Twilio gets an empty answer at once, and the reply follows on WhatsApp.
+    assert "<Message>" not in response.text
+    assert "Things you can send me" in last_reply()
+    assert texted_numbers == []  # on WhatsApp, not by SMS
 
 
 def test_whatsapp_for_someone_who_is_not_a_client(monkeypatch, tmp_path):
     use_fakes(monkeypatch, tmp_path)
 
-    response = signed_whatsapp(MOBILE_CALLER)
+    signed_whatsapp(MOBILE_CALLER)
 
-    assert "askjack.uk" in response.text
-    assert "Test Plumbing" not in response.text
+    assert "askjack.uk" in last_reply()
+    assert "Test Plumbing" not in last_reply()
 
 
 def test_whatsapp_for_a_paused_client(monkeypatch, tmp_path):
     use_fakes(monkeypatch, tmp_path, active=False)
 
-    response = signed_whatsapp(OWNER)
+    signed_whatsapp(OWNER)
 
-    assert "Test Plumbing" not in response.text
+    assert "Test Plumbing" not in last_reply()
 
 
 def test_whatsapp_rejects_missing_signature(monkeypatch, tmp_path):
@@ -808,24 +828,40 @@ def test_whatsapp_reply_attaches_the_pdf(monkeypatch, tmp_path):
     use_fakes(monkeypatch, tmp_path)
     monkeypatch.setattr(settings, "QUOTE_LINK_SECRET", "test-secret")
 
-    response = signed_whatsapp(OWNER, "QUOTE Mrs Jones | Bathroom refit | BR | 1250")
+    signed_whatsapp(OWNER, "QUOTE Mrs Jones | Bathroom refit | BR | 1250")
 
-    assert "<Media>" in response.text
+    words, link = sent_whatsapp[-1]
+    assert link.startswith(settings.PUBLIC_URL + "/quotes/1.pdf")
 
 
 def test_a_tapped_button_runs_its_command(monkeypatch, tmp_path):
     use_quote_links(monkeypatch, tmp_path)
 
     # The button's title is "Make final", but its hidden ID is the command.
-    response = signed_whatsapp(OWNER, body="Make final", button="FINAL 1")
+    signed_whatsapp(OWNER, body="Make final", button="FINAL 1")
 
-    assert "Quote Q1 is final" in response.text
+    assert "Quote Q1 is final" in last_reply()
     assert database.get_quote(1).status == "final"
+
+
+def test_if_working_out_a_reply_fails_jack_says_sorry_and_tells_james(monkeypatch, tmp_path):
+    texted = use_fakes(monkeypatch, tmp_path)
+
+    def broken(sender, body="", media=()):
+        raise RuntimeError("something broke")
+
+    monkeypatch.setattr(whatsapp, "whatsapp_reply", broken)
+
+    response = signed_whatsapp(OWNER, "WEEK")
+
+    assert response.status_code == 200
+    assert last_reply() == whatsapp.SOMETHING_WENT_WRONG
+    assert JAMES in texted
 
 
 def test_a_list_choice_arrives_as_list_id(monkeypatch, tmp_path):
     use_fakes(monkeypatch, tmp_path)
 
     # The ID is the command, whatever the title says.
-    response = signed_whatsapp(OWNER, body="Something else", list_id="PRICES")
-    assert "haven't saved any prices" in response.text
+    signed_whatsapp(OWNER, body="Something else", list_id="PRICES")
+    assert "haven't saved any prices" in last_reply()

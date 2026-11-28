@@ -1028,6 +1028,36 @@ def plain_message_reply(client, body):
     return reply
 
 
+SOMETHING_WENT_WRONG = "Sorry, something went wrong there and I couldn't do that. Please try again in a minute."
+
+
+def answer(sender, body="", media=()):
+    """Work out Jack's reply to a WhatsApp message, then send it.
+
+    This runs after Twilio has been told we got the message. Twilio only waits 15
+    seconds for an answer, and a voice note, a photo or a PDF can take longer, so
+    the reply is sent through Twilio's API instead of in the answer to its request.
+    """
+    try:
+        reply = whatsapp_reply(sender, body, media)
+        if reply.buttons:
+            reply = send_with_buttons(sender, reply)
+            if reply is None:
+                return
+        send_whatsapp(sender, body=reply.text, media_url=reply.link)
+    except Exception as error:
+        # Never silence: say sorry, and tell James. Only the error's type is logged,
+        # since its message could hold a customer's details.
+        print(f"WhatsApp reply failed: {type(error).__name__}", flush=True)
+        client = get_client_by_owner(sender.removeprefix("whatsapp:"))
+        if client is not None:
+            alert_james(client, f"Jack couldn't answer a WhatsApp message ({type(error).__name__}).")
+        try:
+            send_whatsapp(sender, body=SOMETHING_WENT_WRONG)
+        except Exception:
+            pass
+
+
 def send_with_buttons(to, reply):
     """Send the PDF, then the words with buttons.
 

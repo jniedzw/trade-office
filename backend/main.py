@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import FastAPI, Form, HTTPException, Request, Response
+from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, Request, Response
 from twilio.request_validator import RequestValidator
 from twilio.twiml.messaging_response import MessagingResponse
 from twilio.twiml.voice_response import VoiceResponse
@@ -36,7 +36,7 @@ from quotes import link_is_valid
 from reviews import send_review_requests
 from sms import count_old_twilio_records, send_whatsapp_alert
 from weekly import send_weekly_updates
-from whatsapp import send_with_buttons, whatsapp_reply
+from whatsapp import answer as answer_whatsapp
 
 # The usual opt-out and opt-in words for text messages.
 STOP_WORDS = {"STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"}
@@ -261,6 +261,7 @@ async def incoming_sms(
 @app.post("/whatsapp")
 async def incoming_whatsapp(
     request: Request,
+    background: BackgroundTasks,
     From: str = Form(),
     Body: str = Form(""),
     ButtonPayload: str = Form(""),
@@ -271,25 +272,16 @@ async def incoming_whatsapp(
 
     # A tapped button sends its title as Body, and the ID we gave it as ButtonPayload.
     # We make each ID a command, like "FINAL 6", so buttons and typing work the same.
-    # Replying in the response sends it straight back through WhatsApp.
     # A choice from a list menu arrives the same way, with its ID in ListId.
     # Attachments come as MediaUrl0, MediaContentType0, MediaUrl1... with NumMedia saying how many.
     form = await request.form()
     count = min(int(form.get("NumMedia") or 0), 5)
     media = [(form[f"MediaUrl{n}"], form[f"MediaContentType{n}"]) for n in range(count)]
-    reply = whatsapp_reply(From, ButtonPayload or ListId or Body, media)
-    twiml = MessagingResponse()
-    if reply.buttons:
-        reply = send_with_buttons(From, reply)
-        if reply is None:
-            # Already sent, so the response must be empty or Jack would reply twice.
-            return Response(content=str(twiml), media_type="application/xml")
-
-    message = twiml.message(reply.text)
-    if reply.link:
-        # Twilio fetches the file from the link and sends it with the words.
-        message.media(reply.link)
-    return Response(content=str(twiml), media_type="application/xml")
+    # Say "got it" straight away with an empty answer, then work out and send the
+    # reply in the background. Twilio gives up after 15 seconds, and some replies
+    # (voice notes, photos, PDFs) can take longer than that.
+    background.add_task(answer_whatsapp, From, ButtonPayload or ListId or Body, media)
+    return Response(content=str(MessagingResponse()), media_type="application/xml")
 
 
 @app.get("/quotes/{quote_id}.pdf")
