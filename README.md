@@ -1,5 +1,7 @@
 # Trade Office
 
+[![Tests](https://github.com/jniedzw/trade-office/actions/workflows/tests.yml/badge.svg)](https://github.com/jniedzw/trade-office/actions/workflows/tests.yml)
+
 An office assistant for UK tradespeople, sold as **Ask Jack** ([askjack.uk](https://askjack.uk)). When a plumber or electrician can't answer their phone, the caller gets a text from the business within seconds, so the job isn't lost to the next number on Google. Then "Jack" handles the admin on WhatsApp: jobs, quotes, bookings, invoices and payments, in the tradesperson's own words.
 
 Built with Python, FastAPI, SQLModel and Twilio, with Claude for reading rough messages.
@@ -19,7 +21,7 @@ Built with Python, FastAPI, SQLModel and Twilio, with Claude for reading rough m
 
 ## Status
 
-Phase 1 (proof of concept) is complete and Phase 2 is built. The app is deployed on Render and runs 24/7, and it has been tested with real calls on a UK Twilio number, including real call forwarding from a mobile. It has 342 pytest tests, plus small evaluation scripts that check the AI against made-up messages. Next: a first trial with a real tradesperson.
+Phase 1 (proof of concept) is complete and Phase 2 is built. The app is deployed on Render and runs 24/7, and it has been tested with real calls on a UK Twilio number, including real call forwarding from a mobile. It has 359 pytest tests, run on GitHub Actions with every push, plus small evaluation scripts that check the AI against made-up messages. Next: a first trial with a real tradesperson.
 
 One real-world finding: on iPhones, **Live Voicemail** answers missed calls on the phone itself, so the network never treats them as unanswered and the divert never happens. It has to be turned off during setup.
 
