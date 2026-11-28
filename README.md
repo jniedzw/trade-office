@@ -83,7 +83,8 @@ backend/
   web.py           # the tradesperson's own web pages and login
   admin.py         # my admin pages for managing clients
   templates/       # the HTML for those pages
-  database.py      # SQLModel tables (clients, calls, customers, jobs, quotes, invoices) and lookups
+  models.py        # the database tables (clients, calls, customers, jobs, quotes, invoices)
+  database.py      # the functions that read and change them
   sms.py           # send_sms() using the Twilio client
   quotes.py        # read typed quotes, money and dates, signed download links
   pdfs.py          # make quote and invoice PDFs in the client's colours
