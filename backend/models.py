@@ -21,6 +21,8 @@ class Client(SQLModel, table=True):
     markup_percent: int = 0
     # The owner's first name, so Jack can say "Morning Andy". Empty if not given.
     owner_name: str = ""
+    # "starter" (missed calls only) or "pro" (everything, including Jack on WhatsApp).
+    plan: str = "pro"
 
 
 def now_utc():

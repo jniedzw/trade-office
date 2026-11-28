@@ -162,3 +162,30 @@ def test_only_admin_can_download_a_backup(monkeypatch, tmp_path):
 
     assert response.status_code == 401
     assert not response.content.startswith(b"SQLite")
+
+
+def test_admin_adds_a_starter_client_and_moves_them_to_pro(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    cookie = admin_cookie()
+
+    client.post("/admin/clients", headers=cookie, follow_redirects=False, data={
+        "business_name": "Test Electrics", "owner_mobile": "07700 900333",
+        "twilio_number": "+447700900444", "plan": "starter"})
+    new = [c for c in database.all_clients() if c.business_name == "Test Electrics"][0]
+    assert new.plan == "starter"
+
+    client.post(f"/admin/clients/{new.id}", headers=cookie, follow_redirects=False, data={
+        "business_name": "Test Electrics", "owner_mobile": "07700 900333",
+        "text_back_message": "Sorry we missed you", "active": "yes", "plan": "pro"})
+    assert database.get_client(new.id).plan == "pro"
+
+
+def test_admin_refuses_a_made_up_plan(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    response = client.post("/admin/clients", headers=admin_cookie(), data={
+        "business_name": "Test Electrics", "owner_mobile": "07700 900333",
+        "twilio_number": "+447700900444", "plan": "gold"})
+
+    assert "Please pick Starter or Pro." in response.text
+    assert len(database.all_clients()) == 1

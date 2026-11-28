@@ -35,7 +35,8 @@ def send_weekly_updates():
     if not (settings.WHATSAPP_NUMBER and settings.WHATSAPP_WEEKLY_TEMPLATE):
         return
     for client in active_clients():
-        if not whatsapp_alerts_on(client.id):
+        # Jobs and money are part of Pro, so Starter clients have nothing to sum up.
+        if client.plan != "pro" or not whatsapp_alerts_on(client.id):
             continue
         jobs, owed = week_summary(client.id, now_utc())
         backup = f"Your week ahead: {jobs} booked, and {owed} owed to you. Reply WEEK on WhatsApp for details."

@@ -75,6 +75,8 @@ NEW_COLUMNS = [
     ("job", "review_asked_at", "DATETIME"),
     ("businessdetails", "review_link", "VARCHAR NOT NULL DEFAULT ''"),
     ("client", "owner_name", "VARCHAR NOT NULL DEFAULT ''"),
+    # Clients from before plans existed keep everything they had.
+    ("client", "plan", "VARCHAR NOT NULL DEFAULT 'pro'"),
 ]
 
 
@@ -1111,7 +1113,11 @@ def all_clients():
         return session.exec(select(Client).order_by(Client.id.desc())).all()
 
 
-def add_client(business_name, owner_mobile, twilio_number, text_back_message):
+# The plans a client can be on, as stored, and how each is shown.
+PLANS = {"starter": "Starter", "pro": "Pro"}
+
+
+def add_client(business_name, owner_mobile, twilio_number, text_back_message, plan="pro"):
     """Add a client and return their ID, or None if that Twilio number is already used."""
     if get_client_by_number(twilio_number) is not None:
         return None
@@ -1120,6 +1126,7 @@ def add_client(business_name, owner_mobile, twilio_number, text_back_message):
         owner_mobile=owner_mobile,
         twilio_number=twilio_number,
         text_back_message=text_back_message,
+        plan=plan,
     )
     with Session(engine) as session:
         session.add(client)
@@ -1170,6 +1177,17 @@ def is_admin(cookie):
         )
         login = session.exec(statement).first()
         return login is not None and as_utc(login.expires_at) > now_utc()
+
+
+def set_plan(client_id, plan):
+    """Put a client on a plan: "starter" or "pro"."""
+    if plan not in PLANS:
+        raise ValueError(f"Unknown plan: {plan}")
+    with Session(engine) as session:
+        client = session.get(Client, client_id)
+        client.plan = plan
+        session.add(client)
+        session.commit()
 
 
 def set_owner_name(client_id, name):

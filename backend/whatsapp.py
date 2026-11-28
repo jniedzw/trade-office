@@ -884,6 +884,21 @@ def quote_to_invoice(client, job):
     return quote
 
 
+STARTER_TEXT = (
+    "You're on Ask Jack Starter: I text back callers you miss and tell you who rang. "
+    "Jobs, quotes, invoices and the rest are part of Pro. To upgrade to Pro, email hello@askjack.uk.\n"
+    "Send ALERTS ON for missed-call alerts here on WhatsApp, or ALERTS OFF for texts."
+)
+
+
+def starter_reply(client, body):
+    """Answer a Starter client: alerts can be switched, everything else is part of Pro."""
+    words = body.strip()
+    if words.upper().split()[:1] == ["ALERTS"]:
+        return alerts_reply(client, words[len("ALERTS"):])
+    return Reply(STARTER_TEXT)
+
+
 def alerts_reply(client, details):
     """Turn WhatsApp alerts on or off."""
     if details.strip().upper() == "ON":
@@ -965,6 +980,9 @@ def whatsapp_reply(sender, body="", media=()):
     client = get_client_by_owner(number)
     if client is None or not client.active:
         return Reply(WHATSAPP_NOT_A_CLIENT)
+    # Starter is missed calls only: no jobs, quotes or AI.
+    if client.plan == "starter":
+        return starter_reply(client, body)
     # Any AI calls for this message are logged against this client.
     ai.current_client_id.set(client.id)
 

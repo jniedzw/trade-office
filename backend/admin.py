@@ -11,6 +11,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from ai import uk_mobile
 from ai_costs import cost_in_dollars
 from database import (
+    PLANS,
+    set_plan,
     backup_bytes,
     ADMIN_SESSION_HOURS,
     add_client,
@@ -90,7 +92,7 @@ def clients_page(request: Request, error: str = ""):
             "client": client, "jobs": len(data["jobs"]), "quotes": len(data["quotes"]),
             "invoices": len(data["invoices"]), "ai_cost": f"${costs.get(client.id, 0):.2f}",
         })
-    return page(request, "admin.html", rows=rows, error=error)
+    return page(request, "admin.html", rows=rows, error=error, plans=PLANS)
 
 
 @router.get("/backup")
@@ -111,18 +113,21 @@ def new_client(
     business_name: str = Form(""),
     owner_mobile: str = Form(""),
     twilio_number: str = Form(""),
+    plan: str = Form("pro"),
 ):
     if (blocked := admin_only(request)) is not None:
         return blocked
     mobile = uk_mobile(owner_mobile, owner_mobile)
     number = twilio_number.replace(" ", "")
+    if plan not in PLANS:
+        return clients_page(request, error="Please pick Starter or Pro.")
     if not business_name.strip() or mobile is None or not (number.startswith("+44") and number[1:].isdigit()):
         return clients_page(request, error="Please give a business name, a UK mobile, and a +44 Twilio number.")
     message = (
         f"Hi, it's {business_name.strip()}. Sorry we missed your call. "
         "What can we help with? We'll call you back today."
     )
-    client_id = add_client(business_name.strip(), mobile, number, message)
+    client_id = add_client(business_name.strip(), mobile, number, message, plan)
     if client_id is None:
         return clients_page(request, error="That Twilio number already belongs to a client.")
     return back_to(f"/admin/clients/{client_id}")
@@ -136,7 +141,7 @@ def client_page(request: Request, client_id: int, error: str = "", saved: str = 
     if client is None:
         return back_to("/admin")
     return page(
-        request, "admin_client.html", client_row=client, details=get_business_details(client_id),
+        request, "admin_client.html", client_row=client, details=get_business_details(client_id), plans=PLANS,
         skip=skip_numbers(client_id), error=error, saved=saved,
     )
 
@@ -150,14 +155,20 @@ def save_client(
     text_back_message: str = Form(""),
     active: str = Form(""),
     owner_name: str = Form(""),
+    plan: str = Form(""),
 ):
     if (blocked := admin_only(request)) is not None:
         return blocked
     mobile = uk_mobile(owner_mobile, owner_mobile)
+    # No plan sent means keep the one they're on.
+    if plan and plan not in PLANS:
+        return client_page(request, client_id, error="Please pick Starter or Pro.")
     if not business_name.strip() or mobile is None or not text_back_message.strip():
         return client_page(request, client_id, error="Please give a business name, a UK mobile and a message.")
     update_client(client_id, business_name.strip(), mobile, text_back_message.strip(), active == "yes")
     set_owner_name(client_id, owner_name)
+    if plan:
+        set_plan(client_id, plan)
     return back_to(f"/admin/clients/{client_id}?saved=yes")
 
 

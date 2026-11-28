@@ -15,6 +15,10 @@
   <div class="fields two">
     <div class="field"><label>Business name</label><input name="business_name" value="{{ client_row.business_name }}" required></div>
     <div class="field"><label>First name <span class="hint">(for Jack's greetings)</span></label><input name="owner_name" value="{{ client_row.owner_name }}"></div>
+    <div class="field"><label>Plan <span class="hint">(Starter has no Jack on WhatsApp)</span></label>
+      <select name="plan">
+        {% for value, title in plans.items() %}<option value="{{ value }}"{% if client_row.plan == value %} selected{% endif %}>{{ title }}</option>{% endfor %}
+      </select></div>
     <div class="field"><label>Their mobile</label><input name="owner_mobile" value="{{ client_row.owner_mobile }}" required></div>
     <div class="field"><label>Twilio number <span class="hint">(can't be changed here)</span></label><input value="{{ client_row.twilio_number }}" disabled></div>
     <div class="field wide"><label>Text-back message</label><textarea name="text_back_message" rows="3" required>{{ client_row.text_back_message }}</textarea></div>

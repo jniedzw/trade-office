@@ -1516,3 +1516,28 @@ def test_a_command_followed_by_a_name_and_more_words(monkeypatch, tmp_path):
     text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "send mrs jones her quote")
 
     assert text.startswith("Sent quote Q2 to Mrs Jones")
+
+
+def test_starter_clients_only_get_missed_calls(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    database.set_plan(1, "starter")
+
+    def no_ai(message):
+        raise AssertionError("Starter clients must never reach the AI")
+
+    monkeypatch.setattr(whatsapp, "route_message", no_ai)
+
+    for message in ["hi", "LOG Mrs Jones | Leaking radiator", "who owes me", "MENU JOBS"]:
+        text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", message)
+        assert text == whatsapp.STARTER_TEXT, message
+    assert database.everything_for(1)["jobs"] == []
+
+
+def test_starter_clients_can_still_switch_alerts(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    database.set_plan(1, "starter")
+
+    text, link, buttons = whatsapp.whatsapp_reply(f"whatsapp:{OWNER}", "alerts on")
+
+    assert text.startswith("Done. Missed-call alerts will come here.")
+    assert database.whatsapp_alerts_on(1)

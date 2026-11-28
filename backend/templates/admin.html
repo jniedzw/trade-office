@@ -10,6 +10,7 @@
 <a class="card client-card" href="/admin/clients/{{ row.client.id }}">
   <div class="row">
     <strong style="flex: 1;">{{ row.client.business_name }}</strong>
+    <span class="pill plan">{{ plans[row.client.plan] }}</span>
     <span class="pill {{ 'on' if row.client.active else 'off' }}">{{ "Active" if row.client.active else "Paused" }}</span>
   </div>
   <div class="stats">
@@ -33,6 +34,11 @@
     <div class="field wide"><label>Business name</label><input name="business_name" required></div>
     <div class="field"><label>Their mobile</label><input name="owner_mobile" placeholder="07700 900123" required></div>
     <div class="field"><label>Their Twilio number</label><input name="twilio_number" placeholder="+447..." required></div>
+    <div class="field"><label>Plan</label>
+      <select name="plan">
+        <option value="pro">Pro: everything, £99</option>
+        <option value="starter">Starter: missed calls only, £49</option>
+      </select></div>
   </div>
   <p class="muted">Next: fill in their quote and invoice details on their page.</p>
   <button type="submit">Add client</button>

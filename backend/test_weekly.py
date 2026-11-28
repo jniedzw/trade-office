@@ -82,3 +82,14 @@ def test_a_failed_update_goes_by_sms(monkeypatch, tmp_path):
     weekly.send_weekly_updates()
 
     assert texted_numbers == [OWNER]
+
+
+def test_starter_clients_get_no_weekly_update(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    sent = use_weekly(monkeypatch)
+    database.set_whatsapp_alerts(1, True)
+    database.set_plan(1, "starter")
+
+    weekly.send_weekly_updates()
+
+    assert sent == []
