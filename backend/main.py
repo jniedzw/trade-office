@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from twilio.request_validator import RequestValidator
 from twilio.twiml.messaging_response import MessagingResponse
 from twilio.twiml.voice_response import VoiceResponse
@@ -11,6 +12,7 @@ import settings
 import web
 from alerts import alert_by_sms, alert_james, try_send
 from database import (
+    database_ok,
     create_tables,
     delete_old_calls,
     everything_for,
@@ -184,6 +186,14 @@ def forward_message(sender, body):
 @app.get("/")
 def root():
     return {"message": "Trade Office is running"}
+
+
+@app.get("/health")
+def health():
+    """For uptime monitors: 200 only if the app is up and its database answers."""
+    if not database_ok():
+        return JSONResponse({"ok": False}, status_code=503)
+    return {"ok": True}
 
 
 @app.post("/voice")

@@ -5,12 +5,13 @@ Logged into from a one-time link Jack sends when James messages ADMIN from his a
 
 from datetime import timedelta
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from ai import uk_mobile
 from ai_costs import cost_in_dollars
 from database import (
+    backup_bytes,
     ADMIN_SESSION_HOURS,
     add_client,
     add_skip_number,
@@ -90,6 +91,18 @@ def clients_page(request: Request, error: str = ""):
             "invoices": len(data["invoices"]), "ai_cost": f"${costs.get(client.id, 0):.2f}",
         })
     return page(request, "admin.html", rows=rows, error=error)
+
+
+@router.get("/backup")
+def backup(request: Request):
+    """A copy of the whole database, to keep somewhere other than Render."""
+    if (blocked := admin_only(request)) is not None:
+        return blocked
+    filename = f"ask-jack-backup-{now_utc():%Y-%m-%d}.db"
+    return Response(
+        content=backup_bytes(), media_type="application/vnd.sqlite3",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("/clients")

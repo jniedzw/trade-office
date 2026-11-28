@@ -2,7 +2,10 @@ import hashlib
 import json
 import os
 import secrets
+import sqlite3
+import tempfile
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 
 from sqlalchemy import delete, inspect, text, update
 from sqlmodel import Field, Session, SQLModel, UniqueConstraint, create_engine, select
@@ -333,6 +336,34 @@ def add_missing_columns():
             existing = [col["name"] for col in inspector.get_columns(table)]
             if column not in existing:
                 connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {definition}"))
+
+
+def database_ok():
+    """Return True if the database answers a simple question, for the health check."""
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        return True
+    except Exception:
+        return False
+
+
+def backup_bytes():
+    """Return a copy of the whole SQLite database as bytes.
+
+    SQLite's own backup copies it safely even while the app is writing to it,
+    unlike copying the file, which could catch it halfway through a change.
+    """
+    raw = engine.raw_connection()
+    try:
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "backup.db"
+            target = sqlite3.connect(path)
+            raw.driver_connection.backup(target)
+            target.close()
+            return path.read_bytes()
+    finally:
+        raw.close()
 
 
 def create_tables():

@@ -1,3 +1,5 @@
+import sqlite3
+
 import database
 import whatsapp
 from test_main import JAMES, OWNER, client, use_fakes
@@ -137,3 +139,26 @@ def test_admin_saves_the_owners_first_name(monkeypatch, tmp_path):
     })
 
     assert database.get_client(1).owner_name == "Dave"
+
+
+def test_admin_can_download_a_backup_of_the_whole_database(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    database.save_job(1, "Mrs Jones", "Radiator")
+
+    response = client.get("/admin/backup", headers=admin_cookie())
+
+    assert response.headers["content-disposition"].startswith('attachment; filename="ask-jack-backup-')
+    assert response.content.startswith(b"SQLite format 3")
+    copy = tmp_path / "copy.db"
+    copy.write_bytes(response.content)
+    with sqlite3.connect(copy) as connection:
+        assert connection.execute("SELECT customer_name FROM job").fetchall() == [("Mrs Jones",)]
+
+
+def test_only_admin_can_download_a_backup(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    response = client.get("/admin/backup")
+
+    assert response.status_code == 401
+    assert not response.content.startswith(b"SQLite")

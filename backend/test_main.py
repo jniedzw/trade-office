@@ -865,3 +865,18 @@ def test_a_list_choice_arrives_as_list_id(monkeypatch, tmp_path):
     # The ID is the command, whatever the title says.
     signed_whatsapp(OWNER, body="Something else", list_id="PRICES")
     assert "haven't saved any prices" in last_reply()
+
+
+def test_health_check_says_ok_when_the_database_answers(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+
+    response = client.get("/health")
+
+    assert response.status_code == 200 and response.json() == {"ok": True}
+
+
+def test_health_check_fails_when_the_database_doesnt(monkeypatch, tmp_path):
+    use_fakes(monkeypatch, tmp_path)
+    monkeypatch.setattr(main, "database_ok", lambda: False)
+
+    assert client.get("/health").status_code == 503
